@@ -296,6 +296,16 @@
         </div>
       </div>
 
+      <div class="field-group" id="odt-channel-group" style="display:none;">
+        <label for="odt-channel">ODT Channel</label>
+        <select id="odt-channel" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:0.88rem;padding:12px 14px;outline:none;cursor:pointer;">
+          <option value="">— Select Channel —</option>
+          <option value="ODS">ODS (id2=dV9XX0xY)</option>
+          <option value="DSP">DSP (id2=ckFCRVBW)</option>
+        </select>
+        <div class="hint">Required for OneDigitalTurbine integrations. Sets the <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem;">id2</code> parameter.</div>
+      </div>
+
       <button class="btn-primary" onclick="buildLink()">
         <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
         Build Link
@@ -332,6 +342,12 @@
       return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
+    // ── ODT Channel id2 values ─────────────────────────────────────────────────
+    const ODT_CHANNEL_ID2 = {
+      'ODS': 'dV9XX0xY',
+      'DSP': 'ckFCRVBW'
+    };
+
     // ── Detectors ─────────────────────────────────────────────────────────────
     function isUUID(str) {
       return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
@@ -345,6 +361,24 @@
       return pid === 'onedigitalturbine_int';
     }
 
+    // ── Show/hide ODT channel selector based on link ─────────────────────────
+    function checkForODT() {
+      const rawLink = document.getElementById('tracking-input').value.trim();
+      const odtGroup = document.getElementById('odt-channel-group');
+      try {
+        const url = new URL(rawLink);
+        const params = new URLSearchParams(url.search);
+        const pid = params.get('pid') || '';
+        odtGroup.style.display = isODT(pid) ? 'block' : 'none';
+      } catch {
+        odtGroup.style.display = 'none';
+      }
+    }
+
+    // Listen for changes to the tracking link input
+    document.getElementById('tracking-input').addEventListener('input', checkForODT);
+    document.getElementById('tracking-input').addEventListener('paste', () => setTimeout(checkForODT, 0));
+
     // ── Alert helpers ─────────────────────────────────────────────────────────
     function makeAlert(type, icon, message) {
       return `<div class="alert alert-${type}"><span class="alert-icon">${icon}</span><span>${message}</span></div>`;
@@ -355,6 +389,7 @@
       const rawLink   = document.getElementById('tracking-input').value.trim();
       const deviceId  = document.getElementById('device-id').value.trim();
       const clickIdVal = document.getElementById('click-id').value.trim() || 'David1';
+      const odtChannel = document.getElementById('odt-channel').value;
 
       const outputSection = document.getElementById('output-section');
       const alertContainer = document.getElementById('alert-container');
@@ -390,6 +425,12 @@
       const pid    = params.get('pid') || '';
       const integrationIsODT = isODT(pid);
       const changes = [];
+
+      // ── Validate ODT channel selection ──────────────────────────────────────
+      if (integrationIsODT && !odtChannel) {
+        alertContainer.innerHTML = makeAlert('error', '⚠️', 'Please select an ODT Channel (ODS or DSP) for this OneDigitalTurbine integration.');
+        return;
+      }
 
       // ── Determine hashing requirement for any sha1_ param ─────────────────
       let resolvedDeviceId = deviceId;
@@ -476,6 +517,13 @@
             changes.push({ param: key, value: resolvedDeviceId, desc: 'Raw Device ID' });
           }
         }
+
+        // 4. Set id2 parameter based on ODT channel selection
+        if (odtChannel && ODT_CHANNEL_ID2[odtChannel]) {
+          const oldId2 = params.get('id2') || '';
+          params.set('id2', ODT_CHANNEL_ID2[odtChannel]);
+          changes.push({ param: 'id2', value: ODT_CHANNEL_ID2[odtChannel], desc: `ODT Channel (${odtChannel})` });
+        }
       }
 
       // ── Reconstruct URL ───────────────────────────────────────────────────
@@ -505,6 +553,7 @@
       badgesEl.innerHTML = `<span class="badge ${integrationClass}">${integrationLabel}</span>`;
       if (pid) badgesEl.innerHTML += `<span class="badge badge-legacy" style="background:rgba(139,148,158,0.1);color:#8b94a0;border-color:rgba(139,148,158,0.2);">pid: ${escapeHtml(pid)}</span>`;
       if (sha1Params.length > 0) badgesEl.innerHTML += `<span class="badge badge-hashed">SHA-1 Hashed</span>`;
+      if (integrationIsODT && odtChannel) badgesEl.innerHTML += `<span class="badge badge-odt">${escapeHtml(odtChannel)}</span>`;
 
       // ── Changes summary ───────────────────────────────────────────────────
       if (changes.length > 0) {
