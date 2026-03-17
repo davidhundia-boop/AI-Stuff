@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, quote
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 ODT_PID = "onedigitalturbine_int"
-DEFAULT_CLICK_ID = "David1"
+DEFAULT_CLICK_ID = "Onurthegamer"
 
 # Plain (non-SHA1) advertising ID param names to recognise
 PLAIN_AD_ID_PARAMS = {
@@ -164,10 +164,18 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  # Legacy integration (SHA-1 hashed device ID)
   python builder.py \\
     --link "https://app.appsflyer.com/com.example?pid=appia_int&clickid=[ClickID]&sha1_advertising_id=[AAID_SHA1]" \\
     --device-id "278d8c12-bdfc-4843-a4cd-043631edab0a"
 
+  # OneDigitalTurbine integration
+  python builder.py \\
+    --link "https://app.appsflyer.com/com.makemytrip?af_click_lookback=7d&af_c_id=49378&c=DT_Motorola&id2=[CHANNEL]&sha1_advertising_id=[AAID_SHA1]&clickid=[ClickID]&pid=onedigitalturbine_int&af_siteid=od_[SITE_ID]&af_adset=[CAMPAIGN_NAME]&af_adset_id=[CAMPAIGN_ID]&af_prt=affinityveve" \\
+    --device-id "65a53a0f-87a1-43aa-9df8-da3ed7f6c954" \\
+    --click-id "Onurthegamer"
+
+  # With pre-hashed SHA-1 device ID
   python builder.py \\
     --link "https://app.appsflyer.com/..." \\
     --device-id "e9b0c0da16e7daca61515124da91f9f9b9ed2b80" \\

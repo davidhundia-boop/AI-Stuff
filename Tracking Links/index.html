@@ -280,18 +280,18 @@
 
       <div class="field-group">
         <label for="tracking-input">Raw Tracking Link</label>
-        <textarea id="tracking-input" placeholder="https://app.appsflyer.com/com.example.app?pid=appia_int&clickid=[ClickID]&..."></textarea>
+        <textarea id="tracking-input" placeholder="https://app.appsflyer.com/com.makemytrip?af_click_lookback=7d&af_c_id=49378&c=DT_Motorola&id2=[CHANNEL]&sha1_advertising_id=[AAID_SHA1]&clickid=[ClickID]&pid=onedigitalturbine_int&af_siteid=od_[SITE_ID]&af_adset=[CAMPAIGN_NAME]&af_adset_id=[CAMPAIGN_ID]&af_prt=affinityveve"></textarea>
       </div>
 
       <div class="field-row">
         <div class="field-group">
           <label for="device-id">Your Device ID (GAID / AAID)</label>
-          <input type="text" id="device-id" placeholder="278d8c12-bdfc-4843-a4cd-043631edab0a" />
+          <input type="text" id="device-id" placeholder="65a53a0f-87a1-43aa-9df8-da3ed7f6c954" />
           <div class="hint">Raw UUID or already-hashed SHA1 value.</div>
         </div>
         <div class="field-group">
           <label for="click-id">Test Click ID</label>
-          <input type="text" id="click-id" value="David1" />
+          <input type="text" id="click-id" value="Onurthegamer" />
           <div class="hint">Replaces <code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:0.75rem;">[ClickID]</code> placeholder.</div>
         </div>
       </div>
@@ -354,7 +354,7 @@
     async function buildLink() {
       const rawLink   = document.getElementById('tracking-input').value.trim();
       const deviceId  = document.getElementById('device-id').value.trim();
-      const clickIdVal = document.getElementById('click-id').value.trim() || 'David1';
+      const clickIdVal = document.getElementById('click-id').value.trim() || 'Onurthegamer';
 
       const outputSection = document.getElementById('output-section');
       const alertContainer = document.getElementById('alert-container');
