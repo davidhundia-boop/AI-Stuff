@@ -3,52 +3,52 @@
 Tracking Link Builder
 Applies test values (click ID, device ID) to a raw tracking link
 based on integration type and parameter conventions.
+
+Performance optimized version with:
+- Pre-compiled regex patterns
+- Frozenset for O(1) lookups
+- Efficient string operations
+- Single-pass parameter scanning
 """
 
 import re
 import hashlib
 import argparse
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, quote
+from functools import lru_cache
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 ODT_PID = "onedigitalturbine_int"
 DEFAULT_CLICK_ID = "David1"
 
-# Plain (non-SHA1) advertising ID param names to recognise
-PLAIN_AD_ID_PARAMS = {
+# Plain (non-SHA1) advertising ID param names as frozenset for O(1) lookup
+PLAIN_AD_ID_PARAMS = frozenset({
     "advertising_id", "android_id", "device_id",
     "idfa", "gaid", "aaid", "af_idfa", "af_android_id",
-}
+})
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Pre-compiled regex patterns ───────────────────────────────────────────────
 
-UUID_RE  = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
-SHA1_RE  = re.compile(r'^[0-9a-f]{40}$', re.I)
+UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+SHA1_RE = re.compile(r'^[0-9a-f]{40}$', re.IGNORECASE)
+SHA1_PARAM_RE = re.compile(r'sha1', re.IGNORECASE)
 
+# ── Helpers (optimized) ───────────────────────────────────────────────────────
 
 def is_uuid(value: str) -> bool:
-    return bool(UUID_RE.match(value.strip()))
+    return UUID_RE.match(value.strip()) is not None
 
 
 def is_sha1_hash(value: str) -> bool:
-    return bool(SHA1_RE.match(value.strip()))
+    return SHA1_RE.match(value.strip()) is not None
 
 
+@lru_cache(maxsize=128)
 def sha1_hash(value: str) -> str:
-    """Return lowercase hex SHA-1 digest of value (lowercased before hashing)."""
-    return hashlib.sha1(value.strip().lower().encode()).hexdigest()
-
-
-def find_click_id_key(params: list[tuple[str, str]]) -> str | None:
-    """
-    Return the param name that represents the click ID.
-    Matches 'clickid' and 'click_id' (case-insensitive).
-    """
-    for key, _ in params:
-        if key.lower().replace("_", "") == "clickid":
-            return key
-    return None
+    """Return lowercase hex SHA-1 digest of value (lowercased before hashing).
+    Cached for repeated calls with same value."""
+    return hashlib.sha1(value.strip().lower().encode('utf-8')).hexdigest()
 
 
 def resolve_device_id(device_id: str, sha1_required: bool) -> tuple[str, str | None]:
@@ -67,23 +67,28 @@ def resolve_device_id(device_id: str, sha1_required: bool) -> tuple[str, str | N
     if sha1_required:
         if is_sha1_hash(device_id):
             return device_id.lower(), info
-        elif is_uuid(device_id):
+        if is_uuid(device_id):
             hashed = sha1_hash(device_id)
             info = f"Device ID auto-hashed (SHA-1): {hashed}"
             return hashed, info
-        else:
-            raise ValueError(
-                "The tracking link requires a SHA-1 hashed Device ID, but the value "
-                "provided doesn't look like a UUID or a 40-char hex hash.\n"
-                "  UUID example:  278d8c12-bdfc-4843-a4cd-043631edab0a\n"
-                "  SHA-1 example: e9b0c0da16e7daca61515124da91f9f9b9ed2b80"
-            )
-    else:
-        if not is_uuid(device_id) and not is_sha1_hash(device_id):
-            info = "WARNING: Device ID format looks unexpected — verify the output."
-        return device_id, info
+        raise ValueError(
+            "The tracking link requires a SHA-1 hashed Device ID, but the value "
+            "provided doesn't look like a UUID or a 40-char hex hash.\n"
+            "  UUID example:  278d8c12-bdfc-4843-a4cd-043631edab0a\n"
+            "  SHA-1 example: e9b0c0da16e7daca61515124da91f9f9b9ed2b80"
+        )
+    
+    if not is_uuid(device_id) and not is_sha1_hash(device_id):
+        info = "WARNING: Device ID format looks unexpected — verify the output."
+    return device_id, info
 
-# ── Core builder ──────────────────────────────────────────────────────────────
+
+def _custom_quote(s: str, safe: str, encoding: str, errors: str) -> str:
+    """Custom quote function preserving bracket placeholders."""
+    return quote(s, safe="[]")
+
+
+# ── Core builder (optimized single-pass) ──────────────────────────────────────
 
 def build_link(
     raw_link: str,
@@ -100,42 +105,51 @@ def build_link(
         "changes":           list[dict],   # {param, old, new, desc}
         "messages":          list[str],    # info / warnings
       }
+    
+    Performance: Single-pass parameter scanning with early detection.
     """
     parsed = urlparse(raw_link.strip())
     params = parse_qsl(parsed.query, keep_blank_values=True)
 
-    pid = next((v for k, v in params if k == "pid"), "")
+    # Single-pass scan for pid, sha1 keys, and click_id key
+    pid = ""
+    sha1_keys = []
+    click_key = None
+    
+    for key, value in params:
+        key_lower = key.lower()
+        if key == "pid":
+            pid = value
+        if SHA1_PARAM_RE.search(key):
+            sha1_keys.append(key)
+        if click_key is None and key_lower.replace("_", "") == "clickid":
+            click_key = key
+
     is_odt = pid == ODT_PID
     integration_type = "OneDigitalTurbine" if is_odt else "Legacy"
-
-    sha1_keys = [k for k, _ in params if "sha1" in k.lower()]
-    sha1_required = len(sha1_keys) > 0
+    sha1_required = bool(sha1_keys)
 
     messages: list[str] = []
-    changes:  list[dict] = []
+    changes: list[dict] = []
 
     resolved_id, id_msg = resolve_device_id(device_id, sha1_required)
     if id_msg:
         messages.append(id_msg)
 
-    click_key = find_click_id_key(params)
+    # Convert sha1_keys to set for O(1) lookup
+    sha1_keys_set = frozenset(sha1_keys)
 
-    # Both Legacy and ODT share the same substitution rules for now
+    # Build new params with substitutions
     new_params = []
     for key, value in params:
         new_value = value
 
-        # Replace click ID
-        if click_key and key == click_key:
+        if click_key is not None and key == click_key:
             new_value = click_id_val
             changes.append({"param": key, "old": value, "new": new_value, "desc": "Test click ID"})
-
-        # Replace SHA-1 advertising ID params
-        elif "sha1" in key.lower():
+        elif key in sha1_keys_set:
             new_value = resolved_id
             changes.append({"param": key, "old": value, "new": new_value, "desc": "Hashed Device ID (SHA-1)"})
-
-        # Replace plain advertising ID params (only when no sha1 params exist)
         elif not sha1_required and key.lower() in PLAIN_AD_ID_PARAMS:
             new_value = resolved_id
             changes.append({"param": key, "old": value, "new": new_value, "desc": "Raw Device ID"})
@@ -144,7 +158,7 @@ def build_link(
 
     # Preserve [ ] characters in placeholder values (e.g. [CAMPAIGN_ID])
     output_url = urlunparse(parsed._replace(
-        query=urlencode(new_params, quote_via=lambda s, safe, enc, err: quote(s, safe="[]"))
+        query=urlencode(new_params, quote_via=_custom_quote)
     ))
 
     return {

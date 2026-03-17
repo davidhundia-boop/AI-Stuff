@@ -323,224 +323,261 @@
   </div>
 
   <script>
-    // ── SHA-1 via Web Crypto API ──────────────────────────────────────────────
-    async function sha1(str) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(str);
-      const hashBuffer = await crypto.subtle.digest('SHA-1', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // ── Performance: Cache DOM elements on load ───────────────────────────────
+    const DOM = {};
+    
+    function initDOM() {
+      DOM.trackingInput = document.getElementById('tracking-input');
+      DOM.deviceId = document.getElementById('device-id');
+      DOM.clickId = document.getElementById('click-id');
+      DOM.outputSection = document.getElementById('output-section');
+      DOM.alertContainer = document.getElementById('alert-container');
+      DOM.outputBox = document.getElementById('output-box');
+      DOM.changesList = document.getElementById('changes-list');
+      DOM.badges = document.getElementById('badges');
+      DOM.copyBtn = document.getElementById('copy-btn');
     }
 
-    // ── Detectors ─────────────────────────────────────────────────────────────
+    // ── Pre-compiled regex patterns for speed ─────────────────────────────────
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const SHA1_REGEX = /^[0-9a-f]{40}$/i;
+    const SHA1_PARAM_REGEX = /sha1/i;
+
+    // ── Pre-allocated TextEncoder for SHA-1 (reused) ──────────────────────────
+    const textEncoder = new TextEncoder();
+    const hexLookup = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
+
+    // ── SHA-1 via Web Crypto API (optimized) ──────────────────────────────────
+    async function sha1(str) {
+      const data = textEncoder.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-1', data);
+      const bytes = new Uint8Array(hashBuffer);
+      let hex = '';
+      for (let i = 0; i < bytes.length; i++) {
+        hex += hexLookup[bytes[i]];
+      }
+      return hex;
+    }
+
+    // ── Detectors (optimized with pre-compiled regex) ─────────────────────────
     function isUUID(str) {
-      return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+      return UUID_REGEX.test(str.trim());
     }
 
     function isSHA1Hash(str) {
-      return /^[0-9a-f]{40}$/i.test(str.trim());
+      return SHA1_REGEX.test(str.trim());
     }
 
-    function isODT(pid) {
-      return pid === 'onedigitalturbine_int';
+    // ── Alert helpers (create DOM elements instead of innerHTML) ──────────────
+    function createAlert(type, icon, message) {
+      const div = document.createElement('div');
+      div.className = `alert alert-${type}`;
+      div.innerHTML = `<span class="alert-icon">${icon}</span><span>${message}</span>`;
+      return div;
     }
 
-    // ── Alert helpers ─────────────────────────────────────────────────────────
-    function makeAlert(type, icon, message) {
-      return `<div class="alert alert-${type}"><span class="alert-icon">${icon}</span><span>${message}</span></div>`;
-    }
+    // ── Plain ad ID params as Set for O(1) lookup ─────────────────────────────
+    const PLAIN_AD_IDS = new Set(['advertising_id', 'android_id', 'device_id', 'idfa', 'gaid', 'aaid', 'af_idfa', 'af_android_id']);
 
-    // ── Main builder ──────────────────────────────────────────────────────────
+    // ── Main builder (optimized) ──────────────────────────────────────────────
     async function buildLink() {
-      const rawLink   = document.getElementById('tracking-input').value.trim();
-      const deviceId  = document.getElementById('device-id').value.trim();
-      const clickIdVal = document.getElementById('click-id').value.trim() || 'David1';
+      const rawLink = DOM.trackingInput.value.trim();
+      const deviceId = DOM.deviceId.value.trim();
+      const clickIdVal = DOM.clickId.value.trim() || 'David1';
 
-      const outputSection = document.getElementById('output-section');
-      const alertContainer = document.getElementById('alert-container');
-      const outputBox  = document.getElementById('output-box');
-      const changesList = document.getElementById('changes-list');
-      const badgesEl   = document.getElementById('badges');
-
-      // Reset
-      alertContainer.innerHTML = '';
-      outputBox.innerHTML = '';
-      changesList.innerHTML = '';
-      badgesEl.innerHTML = '';
-      outputSection.classList.remove('hidden');
+      // Fast reset using textContent where possible
+      DOM.alertContainer.textContent = '';
+      DOM.outputBox.textContent = '';
+      DOM.changesList.textContent = '';
+      DOM.badges.textContent = '';
+      DOM.outputSection.classList.remove('hidden');
 
       // ── Validate input ────────────────────────────────────────────────────
       if (!rawLink) {
-        alertContainer.innerHTML = makeAlert('error', '⚠️', 'Please paste a tracking link first.');
+        DOM.alertContainer.appendChild(createAlert('error', '⚠️', 'Please paste a tracking link first.'));
         return;
       }
       if (!deviceId) {
-        alertContainer.innerHTML = makeAlert('error', '⚠️', 'Please enter your Device ID (GAID/AAID).');
+        DOM.alertContainer.appendChild(createAlert('error', '⚠️', 'Please enter your Device ID (GAID/AAID).'));
         return;
       }
 
       let url;
       try { url = new URL(rawLink); }
       catch {
-        alertContainer.innerHTML = makeAlert('error', '⚠️', 'The tracking link does not appear to be a valid URL. Make sure it starts with <code>https://</code>.');
+        DOM.alertContainer.appendChild(createAlert('error', '⚠️', 'The tracking link does not appear to be a valid URL. Make sure it starts with <code>https://</code>.'));
         return;
       }
 
       const params = new URLSearchParams(url.search);
-      const pid    = params.get('pid') || '';
-      const integrationIsODT = isODT(pid);
+      const pid = params.get('pid') || '';
+      const integrationIsODT = pid === 'onedigitalturbine_int';
       const changes = [];
 
-      // ── Determine hashing requirement for any sha1_ param ─────────────────
+      // ── Collect SHA1 params in single pass ──────────────────────────────────
+      const sha1Params = [];
+      let clickIdKey = null;
+      
+      for (const key of params.keys()) {
+        const keyLower = key.toLowerCase();
+        if (SHA1_PARAM_REGEX.test(key)) {
+          sha1Params.push(key);
+        }
+        if (!clickIdKey && keyLower.replace('_', '') === 'clickid') {
+          clickIdKey = key;
+        }
+      }
+
+      // ── Determine hashing requirement ───────────────────────────────────────
       let resolvedDeviceId = deviceId;
+      const sha1Required = sha1Params.length > 0;
 
-      // Collect all param names that contain "sha1"
-      const sha1Params = [...params.keys()].filter(k => k.toLowerCase().includes('sha1'));
-
-      if (sha1Params.length > 0) {
-        // sha1 required
+      if (sha1Required) {
         if (isSHA1Hash(deviceId)) {
-          // Already hashed — use as-is
           resolvedDeviceId = deviceId.trim().toLowerCase();
         } else if (isUUID(deviceId)) {
-          // Need to hash the UUID
           try {
             resolvedDeviceId = await sha1(deviceId.trim().toLowerCase());
-            alertContainer.innerHTML += makeAlert('info', 'ℹ️', `Your Device ID was automatically SHA-1 hashed to: <strong>${resolvedDeviceId}</strong>`);
+            DOM.alertContainer.appendChild(createAlert('info', 'ℹ️', `Your Device ID was automatically SHA-1 hashed to: <strong>${resolvedDeviceId}</strong>`));
           } catch {
-            alertContainer.innerHTML += makeAlert('error', '⚠️', 'Could not hash your Device ID. Please provide an already-hashed SHA-1 value (40 hex characters).');
+            DOM.alertContainer.appendChild(createAlert('error', '⚠️', 'Could not hash your Device ID. Please provide an already-hashed SHA-1 value (40 hex characters).'));
             return;
           }
         } else {
-          alertContainer.innerHTML += makeAlert('warning', '⚠️', `The tracking link requires a <strong>SHA-1 hashed</strong> Device ID, but the value you entered doesn't look like a standard UUID or SHA-1 hash. Provide either a UUID (e.g. <code>278d8c12-bdfc-4843-a4cd-043631edab0a</code>) or a 40-character hex hash.`);
+          DOM.alertContainer.appendChild(createAlert('warning', '⚠️', `The tracking link requires a <strong>SHA-1 hashed</strong> Device ID, but the value you entered doesn't look like a standard UUID or SHA-1 hash. Provide either a UUID (e.g. <code>278d8c12-bdfc-4843-a4cd-043631edab0a</code>) or a 40-character hex hash.`));
           return;
         }
       } else {
-        // No sha1 param — use raw device ID (UUID expected)
         if (!isUUID(deviceId) && !isSHA1Hash(deviceId)) {
-          alertContainer.innerHTML += makeAlert('warning', '⚠️', 'The Device ID format looks unexpected. Continuing anyway — verify the output.');
+          DOM.alertContainer.appendChild(createAlert('warning', '⚠️', 'The Device ID format looks unexpected. Continuing anyway — verify the output.'));
         }
         resolvedDeviceId = deviceId.trim();
       }
 
-      // ── Shared helper: find the click ID param (handles clickid and click_id variants) ──
-      const clickIdKey = [...params.keys()].find(k => k.toLowerCase().replace('_', '') === 'clickid') || null;
+      // ── Apply rules (unified for both integration types) ────────────────────
+      if (clickIdKey) {
+        params.set(clickIdKey, clickIdVal);
+        changes.push({ param: clickIdKey, value: clickIdVal, desc: 'Test click ID' });
+      }
 
-      // ── Apply rules ───────────────────────────────────────────────────────
-      if (!integrationIsODT) {
-        // ── LEGACY INTEGRATION ────────────────────────────────────────────
+      for (const key of sha1Params) {
+        params.set(key, resolvedDeviceId);
+        changes.push({ param: key, value: resolvedDeviceId, desc: 'Hashed Device ID (SHA-1)' });
+      }
 
-        // 1. Replace clickid / click_id
-        if (clickIdKey) {
-          params.set(clickIdKey, clickIdVal);
-          changes.push({ param: clickIdKey, value: clickIdVal, desc: 'Test click ID' });
-        }
-
-        // 2. Replace all sha1_* advertising ID params
-        for (const key of sha1Params) {
-          params.set(key, resolvedDeviceId);
-          changes.push({ param: key, value: resolvedDeviceId, desc: 'Hashed Device ID (SHA-1)' });
-        }
-
-        // 3. Replace plain advertising ID params (non-sha1) if sha1 params were absent
-        if (sha1Params.length === 0) {
-          const plainAdIds = ['advertising_id', 'android_id', 'device_id', 'idfa', 'gaid', 'aaid', 'af_idfa', 'af_android_id']
-            .filter(k => params.has(k));
-          for (const key of plainAdIds) {
-            params.set(key, resolvedDeviceId);
-            changes.push({ param: key, value: resolvedDeviceId, desc: 'Raw Device ID' });
-          }
-        }
-
-      } else {
-        // ── ONE DIGITAL TURBINE (ODT) ─────────────────────────────────────
-
-        // 1. Replace clickid / click_id
-        if (clickIdKey) {
-          params.set(clickIdKey, clickIdVal);
-          changes.push({ param: clickIdKey, value: clickIdVal, desc: 'Test click ID' });
-        }
-
-        // 2. Replace all sha1_* advertising ID params (same as Legacy)
-        for (const key of sha1Params) {
-          params.set(key, resolvedDeviceId);
-          changes.push({ param: key, value: resolvedDeviceId, desc: 'Hashed Device ID (SHA-1)' });
-        }
-
-        // 3. Replace plain advertising ID params if sha1 params were absent
-        if (sha1Params.length === 0) {
-          const plainAdIds = ['advertising_id', 'android_id', 'device_id', 'idfa', 'gaid', 'aaid', 'af_idfa', 'af_android_id']
-            .filter(k => params.has(k));
-          for (const key of plainAdIds) {
+      if (!sha1Required) {
+        for (const key of params.keys()) {
+          if (PLAIN_AD_IDS.has(key.toLowerCase())) {
             params.set(key, resolvedDeviceId);
             changes.push({ param: key, value: resolvedDeviceId, desc: 'Raw Device ID' });
           }
         }
       }
 
-      // ── Reconstruct URL ───────────────────────────────────────────────────
-      const finalUrl = `${url.origin}${url.pathname}?${params.toString()}`;
-
-      // ── Render output with highlights ─────────────────────────────────────
+      // ── Build output with highlights (using DocumentFragment) ───────────────
       const changedKeys = new Set(changes.map(c => c.param));
-      let highlighted = '';
       const base = `${url.origin}${url.pathname}?`;
-      highlighted += escapeHtml(base);
+      
+      const fragment = document.createDocumentFragment();
+      fragment.appendChild(document.createTextNode(base));
 
-      const paramParts = [];
+      let isFirst = true;
       for (const [k, v] of params.entries()) {
+        if (!isFirst) {
+          fragment.appendChild(document.createTextNode('&'));
+        }
+        isFirst = false;
+        
         if (changedKeys.has(k)) {
-          paramParts.push(`<span class="param-changed">${escapeHtml(k)}=${escapeHtml(v)}</span>`);
+          const span = document.createElement('span');
+          span.className = 'param-changed';
+          span.textContent = `${k}=${v}`;
+          fragment.appendChild(span);
         } else {
-          paramParts.push(escapeHtml(`${k}=${v}`));
+          fragment.appendChild(document.createTextNode(`${k}=${v}`));
         }
       }
-      highlighted += paramParts.join('&amp;');
+      
+      DOM.outputBox.appendChild(fragment);
 
-      outputBox.innerHTML = highlighted;
-
-      // ── Badges ────────────────────────────────────────────────────────────
-      const integrationLabel = integrationIsODT ? 'OneDigitalTurbine' : 'Legacy';
-      const integrationClass = integrationIsODT ? 'badge-odt' : 'badge-legacy';
-      badgesEl.innerHTML = `<span class="badge ${integrationClass}">${integrationLabel}</span>`;
-      if (pid) badgesEl.innerHTML += `<span class="badge badge-legacy" style="background:rgba(139,148,158,0.1);color:#8b94a0;border-color:rgba(139,148,158,0.2);">pid: ${escapeHtml(pid)}</span>`;
-      if (sha1Params.length > 0) badgesEl.innerHTML += `<span class="badge badge-hashed">SHA-1 Hashed</span>`;
-
-      // ── Changes summary ───────────────────────────────────────────────────
-      if (changes.length > 0) {
-        changesList.innerHTML = changes.map(c =>
-          `<div class="change-item"><span class="tick">✓</span> <code>${escapeHtml(c.param)}</code> → <code>${escapeHtml(c.value)}</code> <span style="color:var(--text-dim);font-size:0.75rem;">${escapeHtml(c.desc)}</span></div>`
-        ).join('');
-      } else {
-        changesList.innerHTML = `<div class="change-item" style="color:var(--text-dim);">No parameters were modified.</div>`;
+      // ── Badges (using DocumentFragment) ─────────────────────────────────────
+      const badgeFragment = document.createDocumentFragment();
+      
+      const integrationBadge = document.createElement('span');
+      integrationBadge.className = `badge ${integrationIsODT ? 'badge-odt' : 'badge-legacy'}`;
+      integrationBadge.textContent = integrationIsODT ? 'OneDigitalTurbine' : 'Legacy';
+      badgeFragment.appendChild(integrationBadge);
+      
+      if (pid) {
+        const pidBadge = document.createElement('span');
+        pidBadge.className = 'badge badge-legacy';
+        pidBadge.style.cssText = 'background:rgba(139,148,158,0.1);color:#8b94a0;border-color:rgba(139,148,158,0.2)';
+        pidBadge.textContent = `pid: ${pid}`;
+        badgeFragment.appendChild(pidBadge);
       }
+      
+      if (sha1Required) {
+        const hashBadge = document.createElement('span');
+        hashBadge.className = 'badge badge-hashed';
+        hashBadge.textContent = 'SHA-1 Hashed';
+        badgeFragment.appendChild(hashBadge);
+      }
+      
+      DOM.badges.appendChild(badgeFragment);
+
+      // ── Changes summary (using DocumentFragment) ────────────────────────────
+      const changesFragment = document.createDocumentFragment();
+      
+      if (changes.length > 0) {
+        for (const c of changes) {
+          const div = document.createElement('div');
+          div.className = 'change-item';
+          div.innerHTML = `<span class="tick">✓</span> <code>${escapeHtml(c.param)}</code> → <code>${escapeHtml(c.value)}</code> <span style="color:var(--text-dim);font-size:0.75rem;">${escapeHtml(c.desc)}</span>`;
+          changesFragment.appendChild(div);
+        }
+      } else {
+        const div = document.createElement('div');
+        div.className = 'change-item';
+        div.style.color = 'var(--text-dim)';
+        div.textContent = 'No parameters were modified.';
+        changesFragment.appendChild(div);
+      }
+      
+      DOM.changesList.appendChild(changesFragment);
     }
 
-    // ── Copy to clipboard ─────────────────────────────────────────────────────
+    // ── Copy to clipboard (optimized with cached DOM) ─────────────────────────
+    const COPY_ICON = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
+    const COPIED_ICON = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+    
     async function copyLink() {
-      const params = new URLSearchParams();
-      // Re-parse from the displayed output — easier: just grab the text
-      const text = document.getElementById('output-box').innerText;
+      const text = DOM.outputBox.textContent;
       try {
         await navigator.clipboard.writeText(text);
-        const btn = document.getElementById('copy-btn');
-        btn.classList.add('copied');
-        btn.innerHTML = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Copied!`;
+        DOM.copyBtn.classList.add('copied');
+        DOM.copyBtn.innerHTML = COPIED_ICON;
         setTimeout(() => {
-          btn.classList.remove('copied');
-          btn.innerHTML = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
+          DOM.copyBtn.classList.remove('copied');
+          DOM.copyBtn.innerHTML = COPY_ICON;
         }, 2000);
       } catch {
         alert('Copy failed — please select and copy the link manually.');
       }
     }
 
+    // ── HTML escape (optimized with single regex) ─────────────────────────────
+    const ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' };
+    const ESCAPE_REGEX = /[&<>"]/g;
+    
     function escapeHtml(str) {
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+      return String(str).replace(ESCAPE_REGEX, m => ESCAPE_MAP[m]);
+    }
+
+    // ── Initialize on DOM ready ───────────────────────────────────────────────
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initDOM);
+    } else {
+      initDOM();
     }
 
     // Allow Ctrl+Enter to build
