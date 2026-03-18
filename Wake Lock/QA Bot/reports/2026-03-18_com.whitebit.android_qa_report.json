@@ -37,5 +37,44 @@
   "qa_summary": {
     "verdict": "CONDITIONAL PASS",
     "explanation": "Wake lock is present but limited to specific video-related features (video player fullscreen mode and video identity verification). The screen hold does NOT apply to the main app experience - only during video playback or video-based identity verification flows. This is expected behavior for a media-consuming feature and does not represent a battery-draining wake lock throughout normal app usage."
+  },
+  "play_integrity": {
+    "detected": true,
+    "confidence": "high",
+    "client_version": "1.4.0",
+    "api_type": "Standard Integrity API + Classic Integrity API",
+    "evidence": [
+      {
+        "finding": "IntegrityManager / IntegrityManagerFactory",
+        "location": "classes3.dex, classes4.dex, classes5.dex",
+        "description": "Core Play Integrity API classes for requesting integrity tokens"
+      },
+      {
+        "finding": "IntegrityTokenRequest / IntegrityTokenResponse",
+        "location": "classes4.dex",
+        "description": "Token request/response classes for classic Integrity API"
+      },
+      {
+        "finding": "StandardIntegrityManager with PrepareIntegrityTokenRequest, StandardIntegrityToken, StandardIntegrityTokenProvider",
+        "location": "classes5.dex",
+        "description": "Newer Standard Integrity API implementation for faster token retrieval"
+      },
+      {
+        "finding": "PlayIntegrityApiData data class",
+        "location": "classes3.dex",
+        "description": "App-specific data class storing Play Integrity API response (includes piaTimestamp field)"
+      },
+      {
+        "finding": "getPlayIntegrityUrl / getUrlForPlayIntegrityReporting methods",
+        "location": "classes3.dex",
+        "description": "App methods for Play Integrity URL generation and reporting"
+      },
+      {
+        "finding": "integrity.properties file",
+        "location": "APK root",
+        "description": "Play Integrity client library v1.4.0 bundled with app"
+      }
+    ],
+    "verdict": "PASS - Play Integrity is actively implemented"
   }
 }
