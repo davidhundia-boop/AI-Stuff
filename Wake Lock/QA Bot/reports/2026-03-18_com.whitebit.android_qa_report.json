@@ -1,0 +1,41 @@
+{
+  "qa_date": "2026-03-18",
+  "source_url": "https://whitelabel-cdn-prod.digitalturbine.com/files/26b417db-95ee-4530-91ed-baac8a75cab7.apks",
+  "apk_name": "base.apk",
+  "package": "com.whitebit.android",
+  "main_activity": "com.whitebit.whitebitu.MainActivityDefault",
+  "inheritance_chain": [],
+  "wake_lock_detected": true,
+  "confidence": "medium",
+  "needs_manual_review": "No",
+  "flag_reasons": [
+    {
+      "vector": "Window.addFlags(FLAG_KEEP_SCREEN_ON)",
+      "found_in_class": "com.brentvatne.exoplayer.FullScreenPlayerView$KeepScreenOnUpdater",
+      "found_in_method": "run",
+      "tier": 3,
+      "confidence": "medium",
+      "note": "Screen hold found in secondary activity com.brentvatne.exoplayer.FullScreenPlayerView$KeepScreenOnUpdater — may only apply to specific app screens, not the main experience.",
+      "evidence": "Raw DEX bytecode in com.brentvatne.exoplayer.FullScreenPlayerView$KeepScreenOnUpdater.run() contains invoke to Window.addFlags with matching constant."
+    },
+    {
+      "vector": "AXML keepScreenOn=true in res/layout/sns_fragment_video_ident.xml",
+      "found_in_class": "res/layout/sns_fragment_video_ident.xml",
+      "found_in_method": "N/A",
+      "tier": 3,
+      "confidence": "medium",
+      "note": "Layout attribute detected — could belong to app or an unfiltered SDK layout. Manual verification recommended.",
+      "evidence": "Android binary XML layout res/layout/sns_fragment_video_ident.xml contains android:keepScreenOn=\"true\" attribute."
+    }
+  ],
+  "doubt_reasons": [],
+  "manual_review_instructions": null,
+  "comment": "Raw DEX bytecode in com.brentvatne.exoplayer.FullScreenPlayerView$KeepScreenOnUpdater.run() contains invoke to Window.addFlags with matching constant. | Note: Screen hold found in secondary activity com.brentvatne.exoplayer.FullScreenPlayerView$KeepScreenOnUpdater — may only apply to specific app screens, not the main experience. | Android binary XML layout res/layout/sns_fragment_video_ident.xml contains android:keepScreenOn=\"true\" attribute. | Note: Layout attribute detected — could belong to app or an unfiltered SDK layout. Manual verification recommended.",
+  "classes_scanned": 1678,
+  "total_classes_in_apk": 70618,
+  "time_taken_seconds": 1.02,
+  "qa_summary": {
+    "verdict": "CONDITIONAL PASS",
+    "explanation": "Wake lock is present but limited to specific video-related features (video player fullscreen mode and video identity verification). The screen hold does NOT apply to the main app experience - only during video playback or video-based identity verification flows. This is expected behavior for a media-consuming feature and does not represent a battery-draining wake lock throughout normal app usage."
+  }
+}
