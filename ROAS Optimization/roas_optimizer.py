@@ -338,9 +338,11 @@ def print_summary(
     print("\n" + "=" * 80 + "\n")
 
 
-def export_csv(recommendations: list[Recommendation], output_path: str):
-    """Export recommendations to a CSV file."""
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+def export_csv(recommendations: list[Recommendation], output_path: str) -> str:
+    """Export recommendations to a CSV file. Returns the absolute file path."""
+    abs_path = os.path.abspath(output_path)
+    
+    with open(abs_path, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([
             'Campaign', 'Source', 'Action', 'Priority', 'Spend', 'Revenue',
@@ -360,7 +362,43 @@ def export_csv(recommendations: list[Recommendation], output_path: str):
                 rec.reason
             ])
     
-    print(f"  Recommendations exported to: {output_path}")
+    return abs_path
+
+
+def print_slack_output(recommendations: list[Recommendation], roas_goal: float, output_file: str):
+    """Print Slack-friendly summary with file attachment info."""
+    action_counts = {'PAUSE': 0, 'REDUCE': 0, 'MAINTAIN': 0, 'SCALE': 0}
+    total_spend_by_action = {'PAUSE': 0.0, 'REDUCE': 0.0, 'MAINTAIN': 0.0, 'SCALE': 0.0}
+    
+    for rec in recommendations:
+        action_counts[rec.action] += 1
+        total_spend_by_action[rec.action] += rec.campaign.spend
+    
+    pause_recs = [r for r in recommendations if r.action == 'PAUSE']
+    scale_recs = [r for r in recommendations if r.action == 'SCALE']
+    
+    print("\n" + "=" * 60)
+    print("📊 SLACK SUMMARY - ROAS D7 OPTIMIZATION")
+    print("=" * 60)
+    print(f"\n🎯 Target ROAS Goal: {roas_goal}%\n")
+    print(f"🛑 PAUSE: {action_counts['PAUSE']} campaigns (${total_spend_by_action['PAUSE']:,.0f} spend)")
+    print(f"⚠️  REDUCE: {action_counts['REDUCE']} campaigns (${total_spend_by_action['REDUCE']:,.0f} spend)")
+    print(f"✅ MAINTAIN: {action_counts['MAINTAIN']} campaigns (${total_spend_by_action['MAINTAIN']:,.0f} spend)")
+    print(f"🚀 SCALE: {action_counts['SCALE']} campaigns (${total_spend_by_action['SCALE']:,.0f} spend)")
+    
+    if pause_recs:
+        print("\n🛑 TOP CAMPAIGNS TO PAUSE:")
+        for rec in sorted(pause_recs, key=lambda r: r.campaign.spend, reverse=True)[:3]:
+            print(f"   • {rec.campaign.name}: {rec.campaign.roas_d7:.2f}% ROAS (${rec.campaign.spend:,.0f})")
+    
+    if scale_recs:
+        print("\n🚀 TOP CAMPAIGNS TO SCALE:")
+        for rec in sorted(scale_recs, key=lambda r: r.roas_vs_goal, reverse=True)[:3]:
+            print(f"   • {rec.campaign.name}: {rec.campaign.roas_d7:.2f}% ROAS ({rec.roas_vs_goal:.0%} of goal)")
+    
+    print("\n" + "-" * 60)
+    print(f"📎 OUTPUT FILE: {output_file}")
+    print("-" * 60 + "\n")
 
 
 def main():
@@ -437,7 +475,9 @@ Notes:
         args.client
     )
     
-    export_csv(recommendations, args.export)
+    output_file = export_csv(recommendations, args.export)
+    
+    print_slack_output(recommendations, args.goal, output_file)
 
 
 if __name__ == "__main__":
