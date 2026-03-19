@@ -389,7 +389,8 @@ Notes:
     parser.add_argument('--client', '-c', help='Path to client DT_DX CSV file')
     parser.add_argument('--goal', '-g', type=float, default=DEFAULT_ROAS_GOAL,
                         help=f'Target ROAS D7 goal as percentage (default: {DEFAULT_ROAS_GOAL})')
-    parser.add_argument('--export', '-e', help='Export recommendations to CSV file')
+    parser.add_argument('--export', '-e', default='optimization_recommendations.csv',
+                        help='Export recommendations to CSV file (default: optimization_recommendations.csv)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show verbose output')
     
     args = parser.parse_args()
@@ -436,8 +437,7 @@ Notes:
         args.client
     )
     
-    if args.export:
-        export_csv(recommendations, args.export)
+    export_csv(recommendations, args.export)
 
 
 if __name__ == "__main__":
