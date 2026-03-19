@@ -15,6 +15,12 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, quote
 ODT_PID = "onedigitalturbine_int"
 DEFAULT_CLICK_ID = "David1"
 
+# ODT Channel-specific id2 values
+ODT_CHANNEL_ID2 = {
+    "ODS": "dV9XX0xY",
+    "DSP": "ckFCRVBW",
+}
+
 # Plain (non-SHA1) advertising ID param names to recognise
 PLAIN_AD_ID_PARAMS = {
     "advertising_id", "android_id", "device_id",
@@ -89,6 +95,7 @@ def build_link(
     raw_link: str,
     device_id: str,
     click_id_val: str = DEFAULT_CLICK_ID,
+    odt_channel: str | None = None,
 ) -> dict:
     """
     Process a raw tracking link and return a result dict:
@@ -120,7 +127,15 @@ def build_link(
 
     click_key = find_click_id_key(params)
 
-    # Both Legacy and ODT share the same substitution rules for now
+    # For ODT integrations, set id2 based on channel selection
+    odt_id2_value = None
+    if is_odt and odt_channel:
+        channel_upper = odt_channel.upper()
+        if channel_upper in ODT_CHANNEL_ID2:
+            odt_id2_value = ODT_CHANNEL_ID2[channel_upper]
+        else:
+            messages.append(f"WARNING: Unknown ODT channel '{odt_channel}'. Valid options: ODS, DSP")
+
     new_params = []
     for key, value in params:
         new_value = value
@@ -134,6 +149,11 @@ def build_link(
         elif "sha1" in key.lower():
             new_value = resolved_id
             changes.append({"param": key, "old": value, "new": new_value, "desc": "Hashed Device ID (SHA-1)"})
+
+        # Replace id2 for ODT integrations based on channel
+        elif key == "id2" and odt_id2_value:
+            new_value = odt_id2_value
+            changes.append({"param": key, "old": value, "new": new_value, "desc": f"ODT Channel ({odt_channel.upper()})"})
 
         # Replace plain advertising ID params (only when no sha1 params exist)
         elif not sha1_required and key.lower() in PLAIN_AD_ID_PARAMS:
@@ -177,6 +197,7 @@ Examples:
     parser.add_argument("--link",      required=True, help="Raw tracking link")
     parser.add_argument("--device-id", required=True, help="Your GAID/AAID (UUID or SHA-1 hash)")
     parser.add_argument("--click-id",  default=DEFAULT_CLICK_ID, help=f"Test click ID value (default: {DEFAULT_CLICK_ID})")
+    parser.add_argument("--odt-channel", choices=["ODS", "DSP", "ods", "dsp"], help="ODT channel type (ODS or DSP) - sets id2 parameter")
 
     args = parser.parse_args()
 
@@ -185,6 +206,7 @@ Examples:
             raw_link=args.link,
             device_id=args.device_id,
             click_id_val=args.click_id,
+            odt_channel=args.odt_channel,
         )
     except ValueError as e:
         print(f"\n[ERROR] {e}\n")
