@@ -222,6 +222,7 @@
 
     .badge-legacy { background: rgba(251,191,36,0.15); color: var(--warning); border: 1px solid rgba(251,191,36,0.3); }
     .badge-odt { background: rgba(52,211,153,0.12); color: var(--success); border: 1px solid rgba(52,211,153,0.25); }
+    .badge-kochava { background: rgba(244,114,182,0.12); color: #f472b6; border: 1px solid rgba(244,114,182,0.25); }
     .badge-hashed { background: var(--accent-light); color: #a5b4fc; border: 1px solid rgba(91,106,244,0.3); }
 
     .output-box {
@@ -345,6 +346,11 @@
       return pid === 'onedigitalturbine_int';
     }
 
+    function isKochavaLink(hostname) {
+      const hostLower = hostname.toLowerCase();
+      return hostLower.includes('kochava.com') || hostLower.includes('control.kochava.com');
+    }
+
     // ── Alert helpers ─────────────────────────────────────────────────────────
     function makeAlert(type, icon, message) {
       return `<div class="alert alert-${type}"><span class="alert-icon">${icon}</span><span>${message}</span></div>`;
@@ -389,6 +395,7 @@
       const params = new URLSearchParams(url.search);
       const pid    = params.get('pid') || '';
       const integrationIsODT = isODT(pid);
+      const integrationIsKochava = isKochavaLink(url.hostname);
       const changes = [];
 
       // ── Determine hashing requirement for any sha1_ param ─────────────────
@@ -500,8 +507,17 @@
       outputBox.innerHTML = highlighted;
 
       // ── Badges ────────────────────────────────────────────────────────────
-      const integrationLabel = integrationIsODT ? 'OneDigitalTurbine' : 'Legacy';
-      const integrationClass = integrationIsODT ? 'badge-odt' : 'badge-legacy';
+      let integrationLabel, integrationClass;
+      if (integrationIsKochava) {
+        integrationLabel = 'Kochava';
+        integrationClass = 'badge-kochava';
+      } else if (integrationIsODT) {
+        integrationLabel = 'OneDigitalTurbine';
+        integrationClass = 'badge-odt';
+      } else {
+        integrationLabel = 'Legacy';
+        integrationClass = 'badge-legacy';
+      }
       badgesEl.innerHTML = `<span class="badge ${integrationClass}">${integrationLabel}</span>`;
       if (pid) badgesEl.innerHTML += `<span class="badge badge-legacy" style="background:rgba(139,148,158,0.1);color:#8b94a0;border-color:rgba(139,148,158,0.2);">pid: ${escapeHtml(pid)}</span>`;
       if (sha1Params.length > 0) badgesEl.innerHTML += `<span class="badge badge-hashed">SHA-1 Hashed</span>`;
