@@ -15,6 +15,9 @@ from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, quote
 ODT_PID = "onedigitalturbine_int"
 DEFAULT_CLICK_ID = "David1"
 
+# Kochava domain for integration detection
+KOCHAVA_DOMAINS = {"control.kochava.com", "kochava.com"}
+
 # Plain (non-SHA1) advertising ID param names to recognise
 PLAIN_AD_ID_PARAMS = {
     "advertising_id", "android_id", "device_id",
@@ -49,6 +52,12 @@ def find_click_id_key(params: list[tuple[str, str]]) -> str | None:
         if key.lower().replace("_", "") == "clickid":
             return key
     return None
+
+
+def is_kochava_link(hostname: str) -> bool:
+    """Check if the URL belongs to Kochava based on hostname."""
+    hostname_lower = hostname.lower()
+    return any(domain in hostname_lower for domain in KOCHAVA_DOMAINS)
 
 
 def resolve_device_id(device_id: str, sha1_required: bool) -> tuple[str, str | None]:
@@ -106,7 +115,14 @@ def build_link(
 
     pid = next((v for k, v in params if k == "pid"), "")
     is_odt = pid == ODT_PID
-    integration_type = "OneDigitalTurbine" if is_odt else "Legacy"
+    is_kochava = is_kochava_link(parsed.netloc)
+    
+    if is_kochava:
+        integration_type = "Kochava"
+    elif is_odt:
+        integration_type = "OneDigitalTurbine"
+    else:
+        integration_type = "Legacy"
 
     sha1_keys = [k for k, _ in params if "sha1" in k.lower()]
     sha1_required = len(sha1_keys) > 0
