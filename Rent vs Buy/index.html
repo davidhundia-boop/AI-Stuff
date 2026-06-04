@@ -100,6 +100,84 @@ function snapshotRent(portfolio, contrib, cg){
   return portfolio - Math.max(0, portfolio - contrib) * cg;
 }
 
+/* ===== 2. computeProjection ===== */
+function computeProjection(inp){
+  var H = inp.horizonYears, months = H * 12, price = inp.price;
+  var downPayment = inp.downPaymentIsPct ? price * inp.downPaymentPct / 100 : inp.downPaymentAmount;
+  var closing = price * inp.closingCostsPct / 100;
+  var K = downPayment + closing, loan0 = price - downPayment;
+  var M = monthlyPayment(loan0, inp.mortgageRatePct, inp.termYears);
+  var rm = inp.mortgageRatePct / 100 / 12, ri = toMonthly(inp.expectedReturnPct), ga = toMonthly(inp.appreciationPct);
+  var cg = inp.capitalGainsRatePct / 100;
+
+  var homeValue = price, balance = loan0;
+  var buyerPortfolio = 0, renterPortfolio = K, buyerContrib = 0, renterContrib = K;
+  var yearInterest = 0, yearPropertyTax = 0;
+  var totalInterest = 0, totalOwnership = 0, totalRent = 0, totalTaxSaved = 0;
+
+  var years = [0], buyNW = [snapshotBuy(homeValue, balance, price, closing, inp, cg, buyerPortfolio, buyerContrib)];
+  var rentNW = [snapshotRent(renterPortfolio, renterContrib, cg)];
+
+  for (var m = 1; m <= months; m++){
+    var yi = Math.floor((m - 1) / 12);
+    var inflF = Math.pow(1 + inp.generalInflationPct / 100, yi);
+    var rentF = Math.pow(1 + inp.rentInflationPct / 100, yi);
+
+    var interest = 0, principal = 0, pay = 0;
+    if (balance > 1e-9){
+      interest = balance * rm; principal = M - interest;
+      if (principal > balance) principal = balance;
+      balance -= principal; pay = interest + principal;
+    }
+    var propTax = inp.propertyTaxPct / 100 * homeValue / 12;
+    var maint = inp.maintenancePct / 100 * homeValue / 12;
+    var ins = inp.insuranceAnnual / 12 * inflF;
+    var hoa = inp.hoaMonthly * inflF;
+
+    yearInterest += interest; yearPropertyTax += propTax;
+    totalInterest += interest; totalOwnership += propTax + maint + ins + hoa;
+
+    var effBuy = pay + propTax + maint + ins + hoa;
+    if (m % 12 === 0){
+      var credit = annualTaxCredit(yearInterest, yearPropertyTax, inp);
+      effBuy -= credit; totalTaxSaved += credit; yearInterest = 0; yearPropertyTax = 0;
+    }
+    var rent = inp.rentMonthly * rentF, rins = inp.rentersInsuranceAnnual / 12 * inflF;
+    var effRent = rent + rins; totalRent += rent + rins;
+
+    var s = splitBudget(effBuy, effRent);
+    buyerPortfolio = buyerPortfolio * (1 + ri) + s.buyInvest;
+    renterPortfolio = renterPortfolio * (1 + ri) + s.rentInvest;
+    buyerContrib += s.buyInvest; renterContrib += s.rentInvest;
+
+    homeValue *= (1 + ga);
+
+    if (m % 12 === 0){
+      years.push(m / 12);
+      buyNW.push(snapshotBuy(homeValue, balance, price, closing, inp, cg, buyerPortfolio, buyerContrib));
+      rentNW.push(snapshotRent(renterPortfolio, renterContrib, cg));
+    }
+  }
+
+  var deltaDollar = [], deltaPct = [];
+  for (var y = 0; y <= H; y++){ deltaDollar.push(buyNW[y] - rentNW[y]); deltaPct.push((buyNW[y] - rentNW[y]) / rentNW[y] * 100); }
+
+  return {
+    years:years, buyNW:buyNW, rentNW:rentNW, deltaDollar:deltaDollar, deltaPct:deltaPct,
+    dollarAhead: buyNW[H] - rentNW[H],
+    horizonGapPct: (buyNW[H] / rentNW[H] - 1) * 100,
+    advantage: annualAdvantage(buyNW[H], rentNW[H], H),
+    crossings: findCrossings(deltaDollar),
+    K:K, downPayment:downPayment, closing:closing,
+    breakdown: {
+      totalInterest:totalInterest, totalOwnership:totalOwnership, totalRent:totalRent, totalTaxSaved:totalTaxSaved,
+      equity: homeValue - balance,
+      buyerInvestmentGrowth: buyerPortfolio - buyerContrib,
+      renterInvestmentGrowth: renterPortfolio - renterContrib
+    }
+  };
+}
+
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
 function test(name, fn){ TESTS.push({name:name, fn:fn}); }
@@ -192,6 +270,33 @@ test('snapshotBuy: taxes home-sale gain above exclusion', function(){
   var inp = { sellingCostsPct:6, homeSaleExclusion:250000 };
   var nw = snapshotBuy(900000, 100000, 300000, 9000, inp, 0.15, 0, 0);
   if (!approx(nw, 702950, 1)) throw new Error('taxable gain path: ' + nw);
+});
+
+var DEFAULTS = {
+  price:500000, downPaymentIsPct:true, downPaymentPct:20, downPaymentAmount:100000,
+  closingCostsPct:3, appreciationPct:3, sellingCostsPct:6,
+  mortgageRatePct:6.5, termYears:30,
+  propertyTaxPct:1.1, maintenancePct:1.0, insuranceAnnual:1500, hoaMonthly:300,
+  rentMonthly:2400, rentInflationPct:3, rentersInsuranceAnnual:180,
+  expectedReturnPct:7, generalInflationPct:3,
+  marginalRatePct:32, capitalGainsRatePct:15, interestDeductible:true, propertyTaxDeductible:true,
+  standardDeduction:0, deductionCap:0, homeSaleExclusion:250000,
+  horizonYears:10, currencySymbol:'$'
+};
+test('computeProjection: array shapes and year-0 values', function(){
+  var p = computeProjection(DEFAULTS);
+  if (p.buyNW.length !== 11 || p.rentNW.length !== 11) throw new Error('want 11 yearly points');
+  // year 0: renter NW = K = down(100k)+closing(15k) = 115k
+  if (!approx(p.rentNW[0], 115000, 1)) throw new Error('rentNW0 ' + p.rentNW[0]);
+  // year 0: buyer NW = down - sellingCosts(6% of 500k) = 100k - 30k = 70k
+  if (!approx(p.buyNW[0], 70000, 1)) throw new Error('buyNW0 ' + p.buyNW[0]);
+});
+test('computeProjection: derived metrics are consistent', function(){
+  var p = computeProjection(DEFAULTS);
+  var H = DEFAULTS.horizonYears;
+  if (!approx(p.dollarAhead, p.buyNW[H] - p.rentNW[H], 1e-6)) throw new Error('dollarAhead mismatch');
+  if (!approx(p.advantage, annualAdvantage(p.buyNW[H], p.rentNW[H], H), 1e-9)) throw new Error('advantage mismatch');
+  if (p.deltaDollar.length !== 11) throw new Error('delta length');
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
