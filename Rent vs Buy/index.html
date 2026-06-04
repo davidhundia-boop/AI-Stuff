@@ -67,6 +67,12 @@ function splitBudget(effBuy, effRent){
   var b = Math.max(effBuy, effRent);
   return { budget: b, buyInvest: b - effBuy, rentInvest: b - effRent };
 }
+function annualTaxCredit(yearInterest, yearPropertyTax, p){
+  var deductible = (p.interestDeductible ? yearInterest : 0) + (p.propertyTaxDeductible ? yearPropertyTax : 0);
+  var excess = Math.max(0, deductible - p.standardDeduction);
+  if (p.deductionCap > 0) excess = Math.min(excess, p.deductionCap);
+  return excess * p.marginalRatePct / 100;
+}
 
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
@@ -108,6 +114,23 @@ test('splitBudget: invariant holds (equal total outlay, non-negative)', function
   var s = splitBudget(1800.5, 2400.25);
   if (!approx(1800.5 + s.buyInvest, 2400.25 + s.rentInvest)) throw new Error('not equal');
   if (s.buyInvest < 0 || s.rentInvest < 0) throw new Error('negative invest');
+});
+
+var TAXP = { interestDeductible:true, propertyTaxDeductible:true, standardDeduction:0, deductionCap:0, marginalRatePct:32 };
+test('annualTaxCredit: full benefit when standardDeduction = 0', function(){
+  if (!approx(annualTaxCredit(10000, 5000, TAXP), 4800, 1e-6)) throw new Error('got ' + annualTaxCredit(10000,5000,TAXP));
+});
+test('annualTaxCredit: zero when standardDeduction exceeds deductible', function(){
+  var p = Object.assign({}, TAXP, { standardDeduction: 20000 });
+  if (!approx(annualTaxCredit(10000, 5000, p), 0)) throw new Error('should be 0');
+});
+test('annualTaxCredit: cap limits the excess', function(){
+  var p = Object.assign({}, TAXP, { deductionCap: 10000 });
+  if (!approx(annualTaxCredit(10000, 5000, p), 3200, 1e-6)) throw new Error('got ' + annualTaxCredit(10000,5000,p));
+});
+test('annualTaxCredit: toggles off exclude that component', function(){
+  var p = Object.assign({}, TAXP, { propertyTaxDeductible:false });
+  if (!approx(annualTaxCredit(10000, 5000, p), 3200, 1e-6)) throw new Error('got ' + annualTaxCredit(10000,5000,p));
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
