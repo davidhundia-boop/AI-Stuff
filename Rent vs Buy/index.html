@@ -73,6 +73,19 @@ function annualTaxCredit(yearInterest, yearPropertyTax, p){
   if (p.deductionCap > 0) excess = Math.min(excess, p.deductionCap);
   return excess * p.marginalRatePct / 100;
 }
+function annualAdvantage(buyH, rentH, years){
+  if (rentH <= 0 || buyH <= 0 || years <= 0) return NaN;
+  return (Math.pow(buyH / rentH, 1 / years) - 1) * 100;
+}
+function findCrossings(delta){
+  var out = [];
+  for (var y = 1; y < delta.length; y++){
+    var prev = delta[y-1], cur = delta[y];
+    if (prev < 0 && cur >= 0) out.push({ fromYear:y-1, toYear:y, direction:'buy-ahead' });
+    else if (prev >= 0 && cur < 0) out.push({ fromYear:y-1, toYear:y, direction:'rent-ahead' });
+  }
+  return out;
+}
 
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
@@ -131,6 +144,21 @@ test('annualTaxCredit: cap limits the excess', function(){
 test('annualTaxCredit: toggles off exclude that component', function(){
   var p = Object.assign({}, TAXP, { propertyTaxDeductible:false });
   if (!approx(annualTaxCredit(10000, 5000, p), 3200, 1e-6)) throw new Error('got ' + annualTaxCredit(10000,5000,p));
+});
+
+test('annualAdvantage: equal -> 0', function(){
+  if (!approx(annualAdvantage(100, 100, 10), 0)) throw new Error('should be 0');
+});
+test('annualAdvantage: double over 10yr -> ~7.18%/yr', function(){
+  if (!approx(annualAdvantage(200, 100, 10), 7.177, 1e-2)) throw new Error('got ' + annualAdvantage(200,100,10));
+});
+test('findCrossings: single buy-ahead crossing', function(){
+  var c = findCrossings([-5,-3,-1,2,4]);
+  if (!(c.length === 1 && c[0].toYear === 3 && c[0].direction === 'buy-ahead')) throw new Error(JSON.stringify(c));
+});
+test('findCrossings: two crossings detected', function(){
+  var c = findCrossings([-1, 2, 3, -1]);
+  if (!(c.length === 2 && c[0].direction === 'buy-ahead' && c[1].direction === 'rent-ahead')) throw new Error(JSON.stringify(c));
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
