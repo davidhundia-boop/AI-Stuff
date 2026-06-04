@@ -86,6 +86,17 @@ function findCrossings(delta){
   }
   return out;
 }
+function snapshotBuy(homeValue, balance, price, closing, inp, cg, portfolio, contrib){
+  var selling = inp.sellingCostsPct / 100 * homeValue;
+  var gain = (homeValue - selling) - (price + closing);
+  var taxable = Math.max(0, gain - inp.homeSaleExclusion);
+  var homeSaleTax = taxable * cg;
+  var sideTax = Math.max(0, portfolio - contrib) * cg;
+  return homeValue - balance - selling - homeSaleTax + (portfolio - sideTax);
+}
+function snapshotRent(portfolio, contrib, cg){
+  return portfolio - Math.max(0, portfolio - contrib) * cg;
+}
 
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
@@ -159,6 +170,17 @@ test('findCrossings: single buy-ahead crossing', function(){
 test('findCrossings: two crossings detected', function(){
   var c = findCrossings([-1, 2, 3, -1]);
   if (!(c.length === 2 && c[0].direction === 'buy-ahead' && c[1].direction === 'rent-ahead')) throw new Error(JSON.stringify(c));
+});
+
+test('snapshotRent: subtracts CG tax on gains', function(){
+  // portfolio 120k, contributions 100k, 15% CG -> 120000 - 0.15*20000 = 117000
+  if (!approx(snapshotRent(120000, 100000, 0.15), 117000)) throw new Error('got ' + snapshotRent(120000,100000,0.15));
+});
+test('snapshotBuy: equity net of selling cost, no taxable gain', function(){
+  // value 500k, balance 400k, selling 6%, basis 515k -> gain (500k-30k)-515k<0 -> no tax
+  var inp = { sellingCostsPct:6, homeSaleExclusion:250000 };
+  var nw = snapshotBuy(500000, 400000, 500000, 15000, inp, 0.15, 0, 0);
+  if (!approx(nw, 500000 - 400000 - 30000, 1e-6)) throw new Error('got ' + nw);
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
