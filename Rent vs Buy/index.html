@@ -428,6 +428,7 @@ function recompute(){ render(computeProjection(state)); }
 function fmtMoney(v){ var s = state.currencySymbol, n = Math.round(v);
   return (n < 0 ? '-' : '') + s + Math.abs(n).toLocaleString('en-US'); }
 function fmtK(v){ return state.currencySymbol + Math.round(v/1000).toLocaleString('en-US') + 'k'; }
+function fmtPct(v, d){ return isNaN(v) ? 'n/a' : v.toFixed(d); }
 
 function breakevenLabel(p){
   var H = state.horizonYears, c = p.crossings;
@@ -441,6 +442,11 @@ function breakevenLabel(p){
 }
 
 function render(p){
+  var Hh = state.horizonYears;
+  if (!isFinite(p.dollarAhead) || p.buyNW[Hh] <= 0 || p.rentNW[Hh] <= 0){
+    document.getElementById('results').innerHTML = '<div class="verdict"><div class="big">Adjust your inputs</div><div class="defn">These inputs drive net worth to zero or negative, so a meaningful rent-vs-buy comparison can\'t be computed.</div></div>';
+    return;
+  }
   var H = state.horizonYears, ahead = p.dollarAhead, buyWins = ahead > 0;
   var color = buyWins ? '#2563eb' : '#16a34a';
   var html = '';
@@ -448,14 +454,14 @@ function render(p){
   html += '<div class="verdict" style="background:' + (buyWins?'#eff4ff':'#eefaf1') +
     ';border-color:' + (buyWins?'#bfd3ff':'#b7e4c7') + '">' +
     '<div class="big">' + (buyWins?'Buying':'Renting') + ' ends ' + fmtMoney(Math.abs(ahead)) +
-    ' ahead at year ' + H + ' (' + (p.horizonGapPct>=0?'+':'') + p.horizonGapPct.toFixed(1) + '%)</div>' +
+    ' ahead at year ' + H + ' (' + (p.horizonGapPct>=0?'+':'') + fmtPct(p.horizonGapPct, 1) + '%)</div>' +
     '<div class="defn"><b>$ ahead</b> = Buy − Rent net worth at year ' + H + ' = ' +
     fmtMoney(p.buyNW[H]) + ' − ' + fmtMoney(p.rentNW[H]) + '<br>' +
     '<b>' + breakevenLabel(p) + '</b></div></div>';
 
   html += '<div class="stats">' +
     '<div class="stat"><div class="lbl">Annualized advantage</div><div class="val" style="color:' + color + '">' +
-      (p.advantage>=0?'+':'') + p.advantage.toFixed(2) + '%/yr</div></div>' +
+      (p.advantage>=0?'+':'') + fmtPct(p.advantage, 2) + '%/yr</div></div>' +
     '<div class="stat buy"><div class="lbl">Buy NW · yr ' + H + '</div><div class="val">' + fmtK(p.buyNW[H]) + '</div></div>' +
     '<div class="stat rent"><div class="lbl">Rent NW · yr ' + H + '</div><div class="val">' + fmtK(p.rentNW[H]) + '</div></div>' +
     '</div>';
@@ -480,7 +486,7 @@ function render(p){
     html += '<tr' + cls + '><td>' + y + (beYears[y]?' ◄ break-even':(y===H?' ◄ horizon':'')) + '</td>' +
       '<td>' + fmtK(p.buyNW[y]) + '</td><td>' + fmtK(p.rentNW[y]) + '</td>' +
       '<td class="' + dn + '">' + (p.deltaDollar[y]>=0?'+':'−') + fmtK(Math.abs(p.deltaDollar[y])) + '</td>' +
-      '<td class="' + dn + '">' + (p.deltaPct[y]>=0?'+':'') + p.deltaPct[y].toFixed(1) + '%</td></tr>';
+      '<td class="' + dn + '">' + (p.deltaPct[y]>=0?'+':'') + fmtPct(p.deltaPct[y], 1) + '%</td></tr>';
   }
   html += '</tbody></table>';
 
