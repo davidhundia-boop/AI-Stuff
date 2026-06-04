@@ -63,6 +63,10 @@ function monthlyPayment(principal, annualRatePct, years){
   return principal * r / (1 - Math.pow(1 + r, -n));
 }
 function toMonthly(annualPct){ return Math.pow(1 + annualPct / 100, 1/12) - 1; }
+function splitBudget(effBuy, effRent){
+  var b = Math.max(effBuy, effRent);
+  return { budget: b, buyInvest: b - effBuy, rentInvest: b - effRent };
+}
 
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
@@ -94,6 +98,16 @@ test('monthlyPayment: zero rate', function(){
 });
 test('toMonthly: 7% compounds back to 7%', function(){
   if (!approx(Math.pow(1 + toMonthly(7), 12) - 1, 0.07, 1e-9)) throw new Error('bad compounding');
+});
+
+test('splitBudget: owning pricier -> renter invests gap', function(){
+  var s = splitBudget(3000, 2000);
+  if (!(s.budget === 3000 && s.buyInvest === 0 && s.rentInvest === 1000)) throw new Error('bad split');
+});
+test('splitBudget: invariant holds (equal total outlay, non-negative)', function(){
+  var s = splitBudget(1800.5, 2400.25);
+  if (!approx(1800.5 + s.buyInvest, 2400.25 + s.rentInvest)) throw new Error('not equal');
+  if (s.buyInvest < 0 || s.rentInvest < 0) throw new Error('negative invest');
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
