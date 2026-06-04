@@ -354,8 +354,79 @@ test('findFlip: returns null when no flip in range', function(){
   if (findFlip(base, 'appreciationPct', 3.0, 3.0001) !== null) throw new Error('should be null in tiny range');
 });
 
-/* ===== UI bootstrap (filled in later tasks) ===== */
-function boot(){ /* UI wired up in Task 10+ */ }
+/* ===== 5. UI ===== */
+// field: [key, label, unit, step, isBigDriver]
+var INPUT_CONFIG = [
+  ['Property & purchase', [
+    ['price','Price','$',1000,true],
+    ['downPaymentPct','Down payment','%',1,false],
+    ['closingCostsPct','Closing costs','%',0.1,false],
+    ['appreciationPct','Appreciation','%/yr',0.1,true],
+    ['sellingCostsPct','Selling costs','%',0.1,false]
+  ]],
+  ['Mortgage', [
+    ['mortgageRatePct','Interest rate','%/yr',0.05,true],
+    ['termYears','Term','yr',1,false]
+  ]],
+  ['Ownership costs', [
+    ['propertyTaxPct','Property tax','%/yr',0.05,false],
+    ['maintenancePct','Maintenance','%/yr',0.1,false],
+    ['insuranceAnnual','Insurance','$/yr',50,false],
+    ['hoaMonthly','HOA','$/mo',10,false]
+  ]],
+  ['Renting', [
+    ['rentMonthly','Rent','$/mo',25,true],
+    ['rentInflationPct','Rent inflation','%/yr',0.1,false],
+    ['rentersInsuranceAnnual','Renter’s insurance','$/yr',10,false]
+  ]],
+  ['Investing', [
+    ['expectedReturnPct','Expected return','%/yr',0.1,true],
+    ['generalInflationPct','General inflation','%/yr',0.1,false]
+  ]],
+  ['Taxes', [
+    ['marginalRatePct','Marginal rate','%',1,false],
+    ['capitalGainsRatePct','Capital-gains rate','%',1,false],
+    ['standardDeduction','Standard deduction','$',500,false],
+    ['deductionCap','Deduction cap (0=none)','$',500,false],
+    ['homeSaleExclusion','Home-sale exclusion','$',5000,false]
+  ]],
+  ['Horizon', [ ['horizonYears','Horizon','yr',1,true] ]]
+];
+var BIG_RANGES = { price:[100000,2000000], appreciationPct:[-2,12], mortgageRatePct:[0,12],
+  rentMonthly:[500,12000], expectedReturnPct:[0,15], horizonYears:[1,40] };
+var state = Object.assign({}, DEFAULTS);
+
+function buildInputs(){
+  var host = document.getElementById('inputForm'); host.innerHTML = '';
+  INPUT_CONFIG.forEach(function(group){
+    var g = document.createElement('div'); g.className = 'grp';
+    g.innerHTML = '<h2>' + group[0] + '</h2>';
+    group[1].forEach(function(f){
+      var key = f[0], label = f[1], unit = f[2], step = f[3], big = f[4];
+      var row = document.createElement('div'); row.className = 'fld';
+      var num = '<input type="number" id="in_' + key + '" step="' + step + '" value="' + state[key] + '">';
+      var rng = '';
+      if (big && BIG_RANGES[key]) rng = '<input type="range" id="rg_' + key + '" min="' + BIG_RANGES[key][0] +
+        '" max="' + BIG_RANGES[key][1] + '" step="' + step + '" value="' + state[key] + '">';
+      row.innerHTML = '<label for="in_' + key + '">' + label + '</label>' + rng + num + '<span class="unit">' + unit + '</span>';
+      g.appendChild(row);
+    });
+    host.appendChild(g);
+  });
+  // wire events
+  INPUT_CONFIG.forEach(function(group){ group[1].forEach(function(f){
+    var key = f[0];
+    var num = document.getElementById('in_' + key), rng = document.getElementById('rg_' + key);
+    function onChange(v){ state[key] = parseFloat(v); if (isNaN(state[key])) state[key] = 0;
+      if (num) num.value = state[key]; if (rng) rng.value = state[key]; recompute(); }
+    if (num) num.addEventListener('input', function(){ onChange(num.value); });
+    if (rng) rng.addEventListener('input', function(){ onChange(rng.value); });
+  }); });
+}
+function recompute(){ render(computeProjection(state)); }
+function render(p){ document.getElementById('results').textContent =
+  'Buy ' + Math.round(p.buyNW[state.horizonYears]) + ' vs Rent ' + Math.round(p.rentNW[state.horizonYears]); }
+function boot(){ buildInputs(); recompute(); }
 
 if (location.search.indexOf('test') !== -1) runTests(); else boot();
 </script>
