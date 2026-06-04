@@ -299,6 +299,26 @@ test('computeProjection: derived metrics are consistent', function(){
   if (p.deltaDollar.length !== 11) throw new Error('delta length');
 });
 
+test('engine: equal-budget aggregate invariant (total outlay equal)', function(){
+  // re-derive total outlay from a stripped scenario by instrumenting splitBudget via a clone run
+  var inp = Object.assign({}, DEFAULTS, { horizonYears:5 });
+  var buyTotal = 0, rentTotal = 0;
+  var orig = splitBudget;
+  splitBudget = function(a,b){ var r = orig(a,b); buyTotal += a + r.buyInvest; rentTotal += b + r.rentInvest; return r; };
+  computeProjection(inp); splitBudget = orig;
+  if (!approx(buyTotal, rentTotal, 1e-3)) throw new Error('outlay buy ' + buyTotal + ' rent ' + rentTotal);
+});
+test('engine: zero return -> portfolios equal contributions (no phantom growth)', function(){
+  var inp = Object.assign({}, DEFAULTS, {
+    expectedReturnPct:0, appreciationPct:0, rentInflationPct:0, generalInflationPct:0,
+    capitalGainsRatePct:0, marginalRatePct:0, interestDeductible:false, propertyTaxDeductible:false
+  });
+  var p = computeProjection(inp);
+  // with 0% return and 0% CG, neither portfolio can show growth beyond its contributions
+  if (Math.abs(p.breakdown.renterInvestmentGrowth) > 1e-6) throw new Error('renter phantom growth ' + p.breakdown.renterInvestmentGrowth);
+  if (Math.abs(p.breakdown.buyerInvestmentGrowth) > 1e-6) throw new Error('buyer phantom growth ' + p.breakdown.buyerInvestmentGrowth);
+});
+
 /* ===== UI bootstrap (filled in later tasks) ===== */
 function boot(){ /* UI wired up in Task 10+ */ }
 
