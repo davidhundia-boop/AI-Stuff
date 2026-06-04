@@ -424,8 +424,81 @@ function buildInputs(){
   }); });
 }
 function recompute(){ render(computeProjection(state)); }
-function render(p){ document.getElementById('results').textContent =
-  'Buy ' + Math.round(p.buyNW[state.horizonYears]) + ' vs Rent ' + Math.round(p.rentNW[state.horizonYears]); }
+
+function fmtMoney(v){ var s = state.currencySymbol, n = Math.round(v);
+  return (n < 0 ? '-' : '') + s + Math.abs(n).toLocaleString('en-US'); }
+function fmtK(v){ return state.currencySymbol + Math.round(v/1000).toLocaleString('en-US') + 'k'; }
+
+function breakevenLabel(p){
+  var H = state.horizonYears, c = p.crossings;
+  if (p.deltaDollar[H] > 0 && c.length === 0) return 'Buying ahead the entire horizon';
+  if (p.deltaDollar[H] <= 0 && c.length === 0) return 'Renting ahead the entire horizon';
+  if (c.length === 1) return (c[0].direction === 'buy-ahead')
+    ? 'Buying pulls ahead in year ' + c[0].toYear + ' (stays ahead through year ' + H + ')'
+    : 'Renting pulls ahead in year ' + c[0].toYear;
+  // multiple crossings
+  return c.map(function(x){ return x.direction.replace('-', ' ') + ' @ yr ' + x.toYear; }).join(' → ') + ' (verdict reverses — read the chart)';
+}
+
+function render(p){
+  var H = state.horizonYears, ahead = p.dollarAhead, buyWins = ahead > 0;
+  var color = buyWins ? '#2563eb' : '#16a34a';
+  var html = '';
+
+  html += '<div class="verdict" style="background:' + (buyWins?'#eff4ff':'#eefaf1') +
+    ';border-color:' + (buyWins?'#bfd3ff':'#b7e4c7') + '">' +
+    '<div class="big">' + (buyWins?'Buying':'Renting') + ' ends ' + fmtMoney(Math.abs(ahead)) +
+    ' ahead at year ' + H + ' (' + (p.horizonGapPct>=0?'+':'') + p.horizonGapPct.toFixed(1) + '%)</div>' +
+    '<div class="defn"><b>$ ahead</b> = Buy − Rent net worth at year ' + H + ' = ' +
+    fmtMoney(p.buyNW[H]) + ' − ' + fmtMoney(p.rentNW[H]) + '<br>' +
+    '<b>' + breakevenLabel(p) + '</b></div></div>';
+
+  html += '<div class="stats">' +
+    '<div class="stat"><div class="lbl">Annualized advantage</div><div class="val" style="color:' + color + '">' +
+      (p.advantage>=0?'+':'') + p.advantage.toFixed(2) + '%/yr</div></div>' +
+    '<div class="stat buy"><div class="lbl">Buy NW · yr ' + H + '</div><div class="val">' + fmtK(p.buyNW[H]) + '</div></div>' +
+    '<div class="stat rent"><div class="lbl">Rent NW · yr ' + H + '</div><div class="val">' + fmtK(p.rentNW[H]) + '</div></div>' +
+    '</div>';
+
+  // sensitivity
+  var aFlip = findFlip(state, 'appreciationPct', -5, 15), rFlip = findFlip(state, 'expectedReturnPct', 0, 20);
+  html += '<div class="sens">Sensitivity: ' +
+    (aFlip===null ? 'verdict robust to appreciation in ±5% band' :
+      'verdict flips at appreciation ≈ <b>' + aFlip.toFixed(1) + '%</b> (now ' + state.appreciationPct + '%)') + ' · ' +
+    (rFlip===null ? 'robust to return changes' :
+      'flips at expected return ≈ <b>' + rFlip.toFixed(1) + '%</b> (now ' + state.expectedReturnPct + '%)') + '</div>';
+
+  html += '<div class="chartbox"><div class="legend"><span><i style="background:#2563eb"></i>Buy</span>' +
+    '<span><i style="background:#16a34a"></i>Rent</span></div><div id="chart"></div></div>';
+
+  // table
+  html += '<table><thead><tr><th>Year</th><th>Buy</th><th>Rent</th><th>Δ $</th><th>Δ %</th></tr></thead><tbody>';
+  var beYears = {}; p.crossings.forEach(function(c){ beYears[c.toYear] = true; });
+  for (var y = 1; y <= H; y++){
+    var cls = beYears[y] ? ' class="row-be"' : (y === H ? ' class="row-hz"' : '');
+    var dn = p.deltaDollar[y] >= 0 ? 'pos' : 'neg';
+    html += '<tr' + cls + '><td>' + y + (beYears[y]?' ◄ break-even':(y===H?' ◄ horizon':'')) + '</td>' +
+      '<td>' + fmtK(p.buyNW[y]) + '</td><td>' + fmtK(p.rentNW[y]) + '</td>' +
+      '<td class="' + dn + '">' + (p.deltaDollar[y]>=0?'+':'−') + fmtK(Math.abs(p.deltaDollar[y])) + '</td>' +
+      '<td class="' + dn + '">' + (p.deltaPct[y]>=0?'+':'') + p.deltaPct[y].toFixed(1) + '%</td></tr>';
+  }
+  html += '</tbody></table>';
+
+  // breakdown
+  var b = p.breakdown;
+  html += '<details class="bd"><summary>Where your capital is working (' + H + '-yr totals)</summary>' +
+    '<div>Mortgage interest paid: ' + fmtMoney(b.totalInterest) + '</div>' +
+    '<div>Ownership costs (tax/maint/ins/HOA): ' + fmtMoney(b.totalOwnership) + '</div>' +
+    '<div>Tax deductions saved: ' + fmtMoney(b.totalTaxSaved) + '</div>' +
+    '<div>Total rent paid: ' + fmtMoney(b.totalRent) + '</div>' +
+    '<div>Renter investment growth (opportunity value): ' + fmtMoney(b.renterInvestmentGrowth) + '</div>' +
+    '<div>Buyer side-investment growth: ' + fmtMoney(b.buyerInvestmentGrowth) + '</div>' +
+    '</details>';
+
+  document.getElementById('results').innerHTML = html;
+  drawChart(p);
+}
+function drawChart(p){ /* implemented in Task 12 */ }
 function boot(){ buildInputs(); recompute(); }
 
 if (location.search.indexOf('test') !== -1) runTests(); else boot();
