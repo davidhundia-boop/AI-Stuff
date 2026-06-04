@@ -451,7 +451,7 @@ function breakevenLabel(p){
   if (p.deltaDollar[H] <= 0 && c.length === 0) return 'Renting ahead the entire horizon';
   if (c.length === 1) return (c[0].direction === 'buy-ahead')
     ? 'Buying pulls ahead in year ' + c[0].toYear + ' (stays ahead through year ' + H + ')'
-    : 'Renting pulls ahead in year ' + c[0].toYear;
+    : 'Renting pulls ahead in year ' + c[0].toYear + ' (stays ahead through year ' + H + ')';
   // multiple crossings
   return c.map(function(x){ return x.direction.replace('-', ' ') + ' @ yr ' + x.toYear; }).join(' → ') + ' (verdict reverses — read the chart)';
 }
@@ -484,7 +484,7 @@ function render(p){
   // sensitivity
   var aFlip = findFlip(state, 'appreciationPct', -5, 15), rFlip = findFlip(state, 'expectedReturnPct', 0, 20);
   html += '<div class="sens">Sensitivity: ' +
-    (aFlip===null ? 'verdict robust to appreciation in ±5% band' :
+    (aFlip===null ? 'verdict robust across the tested appreciation range' :
       'verdict flips at appreciation ≈ <b>' + aFlip.toFixed(1) + '%</b> (now ' + state.appreciationPct + '%)') + ' · ' +
     (rFlip===null ? 'robust to return changes' :
       'flips at expected return ≈ <b>' + rFlip.toFixed(1) + '%</b> (now ' + state.expectedReturnPct + '%)') + '</div>';
@@ -545,7 +545,7 @@ function drawChart(p){
   });
   svg += poly(p.buyNW, '#2563eb') + poly(p.rentNW, '#16a34a');
   // x labels
-  svg += '<text x="' + x(0) + '" y="' + (Hh-6) + '" font-size="10" fill="#94a3b8" text-anchor="middle">yr 0</text>';
+  svg += '<text x="' + x(0) + '" y="' + (Hh-6) + '" font-size="10" fill="#94a3b8" text-anchor="start">yr 0</text>';
   svg += '<text x="' + x(H) + '" y="' + (Hh-6) + '" font-size="10" fill="#94a3b8" text-anchor="end">yr ' + H + '</text>';
   svg += '</svg>';
   host.innerHTML = svg;
