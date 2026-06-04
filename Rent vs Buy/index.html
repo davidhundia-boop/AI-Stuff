@@ -173,7 +173,8 @@ function computeProjection(inp){
       totalInterest:totalInterest, totalOwnership:totalOwnership, totalRent:totalRent, totalTaxSaved:totalTaxSaved,
       equity: homeValue - balance,
       buyerInvestmentGrowth: buyerPortfolio - buyerContrib,
-      renterInvestmentGrowth: renterPortfolio - renterContrib
+      renterInvestmentGrowth: renterPortfolio - renterContrib,
+      capitalGainsDrag: Math.max(0, renterPortfolio - renterContrib) * cg + Math.max(0, buyerPortfolio - buyerContrib) * cg
     }
   };
 }
@@ -514,6 +515,8 @@ function render(p){
     '<div>Total rent paid: ' + fmtMoney(b.totalRent) + '</div>' +
     '<div>Renter investment growth (opportunity value): ' + fmtMoney(b.renterInvestmentGrowth) + '</div>' +
     '<div>Buyer side-investment growth: ' + fmtMoney(b.buyerInvestmentGrowth) + '</div>' +
+    '<div>Home equity built (buyer): ' + fmtMoney(b.equity) + '</div>' +
+    '<div>Capital-gains drag on investments: ' + fmtMoney(b.capitalGainsDrag) + '</div>' +
     '</details>';
 
   document.getElementById('results').innerHTML = html;
