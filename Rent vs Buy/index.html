@@ -160,12 +160,12 @@ function computeProjection(inp){
   }
 
   var deltaDollar = [], deltaPct = [];
-  for (var y = 0; y <= H; y++){ deltaDollar.push(buyNW[y] - rentNW[y]); deltaPct.push((buyNW[y] - rentNW[y]) / rentNW[y] * 100); }
+  for (var y = 0; y <= H; y++){ deltaDollar.push(buyNW[y] - rentNW[y]); deltaPct.push(rentNW[y] > 0 ? (buyNW[y] - rentNW[y]) / rentNW[y] * 100 : NaN); }
 
   return {
     years:years, buyNW:buyNW, rentNW:rentNW, deltaDollar:deltaDollar, deltaPct:deltaPct,
     dollarAhead: buyNW[H] - rentNW[H],
-    horizonGapPct: (buyNW[H] / rentNW[H] - 1) * 100,
+    horizonGapPct: rentNW[H] > 0 ? (buyNW[H] / rentNW[H] - 1) * 100 : NaN,
     advantage: annualAdvantage(buyNW[H], rentNW[H], H),
     crossings: findCrossings(deltaDollar),
     K:K, downPayment:downPayment, closing:closing,
@@ -297,6 +297,15 @@ test('computeProjection: derived metrics are consistent', function(){
   if (!approx(p.dollarAhead, p.buyNW[H] - p.rentNW[H], 1e-6)) throw new Error('dollarAhead mismatch');
   if (!approx(p.advantage, annualAdvantage(p.buyNW[H], p.rentNW[H], H), 1e-9)) throw new Error('advantage mismatch');
   if (p.deltaDollar.length !== 11) throw new Error('delta length');
+});
+test('engine: end-to-end DEFAULTS outputs are locked (guards growth ordering)', function(){
+  // Golden values for the default scenario at 7% return; a same-month-compounding
+  // regression (or any engine drift) would move these.
+  var p = computeProjection(DEFAULTS);
+  if (!approx(p.buyNW[10], 405654, 5)) throw new Error('buyNW10 ' + p.buyNW[10]);
+  if (!approx(p.rentNW[10], 401844, 5)) throw new Error('rentNW10 ' + p.rentNW[10]);
+  if (!approx(p.dollarAhead, 3811, 5)) throw new Error('dollarAhead ' + p.dollarAhead);
+  if (!(p.crossings.length === 1 && p.crossings[0].toYear === 10)) throw new Error('crossing ' + JSON.stringify(p.crossings));
 });
 
 test('engine: equal-budget aggregate invariant (total outlay equal)', function(){
