@@ -178,6 +178,19 @@ function computeProjection(inp){
   };
 }
 
+/* ===== 3. SENSITIVITY ===== */
+function findFlip(baseInp, key, lo, hi, steps){
+  steps = steps || 50;
+  function f(x){ var c = Object.assign({}, baseInp); c[key] = x; return computeProjection(c).dollarAhead; }
+  var a = f(lo), b = f(hi);
+  if ((a > 0) === (b > 0)) return null;
+  for (var i = 0; i < steps; i++){
+    var mid = (lo + hi) / 2, fm = f(mid);
+    if ((fm > 0) === (a > 0)){ lo = mid; a = fm; } else { hi = mid; }
+  }
+  return (lo + hi) / 2;
+}
+
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
 function test(name, fn){ TESTS.push({name:name, fn:fn}); }
@@ -326,6 +339,19 @@ test('engine: zero return -> portfolios equal contributions (no phantom growth)'
   // with 0% return and 0% CG, neither portfolio can show growth beyond its contributions
   if (Math.abs(p.breakdown.renterInvestmentGrowth) > 1e-6) throw new Error('renter phantom growth ' + p.breakdown.renterInvestmentGrowth);
   if (Math.abs(p.breakdown.buyerInvestmentGrowth) > 1e-6) throw new Error('buyer phantom growth ' + p.breakdown.buyerInvestmentGrowth);
+});
+
+test('findFlip: appreciation threshold actually flips the verdict', function(){
+  var base = Object.assign({}, DEFAULTS);
+  var thr = findFlip(base, 'appreciationPct', -5, 15);
+  if (thr === null) throw new Error('expected a flip in range');
+  var below = computeProjection(Object.assign({}, base, { appreciationPct: thr - 0.5 })).dollarAhead;
+  var above = computeProjection(Object.assign({}, base, { appreciationPct: thr + 0.5 })).dollarAhead;
+  if ((below > 0) === (above > 0)) throw new Error('threshold does not flip sign');
+});
+test('findFlip: returns null when no flip in range', function(){
+  var base = Object.assign({}, DEFAULTS);
+  if (findFlip(base, 'appreciationPct', 3.0, 3.0001) !== null) throw new Error('should be null in tiny range');
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
