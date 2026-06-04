@@ -355,9 +355,10 @@ test('findFlip: returns null when no flip in range', function(){
 });
 
 /* ===== 5. UI ===== */
-// field: [key, label, unit, step, isBigDriver]
+// field: [key, label, unit, step, isBigDriver, type]  type: 'bool'|'text'|absent=numeric
 var INPUT_CONFIG = [
   ['Property & purchase', [
+    ['currencySymbol','Currency symbol','',1,false,'text'],
     ['price','Price','$',1000,true],
     ['downPaymentPct','Down payment','%',1,false],
     ['closingCostsPct','Closing costs','%',0.1,false],
@@ -388,7 +389,9 @@ var INPUT_CONFIG = [
     ['capitalGainsRatePct','Capital-gains rate','%',1,false],
     ['standardDeduction','Standard deduction','$',500,false],
     ['deductionCap','Deduction cap (0=none)','$',500,false],
-    ['homeSaleExclusion','Home-sale exclusion','$',5000,false]
+    ['homeSaleExclusion','Home-sale exclusion','$',5000,false],
+    ['interestDeductible','Interest deductible','',1,false,'bool'],
+    ['propertyTaxDeductible','Property-tax deductible','',1,false,'bool']
   ]],
   ['Horizon', [ ['horizonYears','Horizon','yr',1,true] ]]
 ];
@@ -402,25 +405,37 @@ function buildInputs(){
     var g = document.createElement('div'); g.className = 'grp';
     g.innerHTML = '<h2>' + group[0] + '</h2>';
     group[1].forEach(function(f){
-      var key = f[0], label = f[1], unit = f[2], step = f[3], big = f[4];
+      var key = f[0], label = f[1], unit = f[2], step = f[3], big = f[4], type = f[5];
       var row = document.createElement('div'); row.className = 'fld';
-      var num = '<input type="number" id="in_' + key + '" step="' + step + '" value="' + state[key] + '">';
-      var rng = '';
-      if (big && BIG_RANGES[key]) rng = '<input type="range" id="rg_' + key + '" min="' + BIG_RANGES[key][0] +
-        '" max="' + BIG_RANGES[key][1] + '" step="' + step + '" value="' + state[key] + '">';
-      row.innerHTML = '<label for="in_' + key + '">' + label + '</label>' + rng + num + '<span class="unit">' + unit + '</span>';
+      var ctrl = '', rng = '';
+      if (type === 'bool'){
+        ctrl = '<input type="checkbox" id="in_' + key + '"' + (state[key] ? ' checked' : '') + '>';
+      } else if (type === 'text'){
+        ctrl = '<input type="text" id="in_' + key + '" value="' + state[key] + '" style="width:40px;padding:4px 4px;border:1px solid #d1d5db;border-radius:6px;font:inherit;">';
+      } else {
+        ctrl = '<input type="number" id="in_' + key + '" step="' + step + '" value="' + state[key] + '">';
+        if (big && BIG_RANGES[key]) rng = '<input type="range" id="rg_' + key + '" min="' + BIG_RANGES[key][0] +
+          '" max="' + BIG_RANGES[key][1] + '" step="' + step + '" value="' + state[key] + '">';
+      }
+      row.innerHTML = '<label for="in_' + key + '">' + label + '</label>' + rng + ctrl + '<span class="unit">' + unit + '</span>';
       g.appendChild(row);
     });
     host.appendChild(g);
   });
   // wire events
   INPUT_CONFIG.forEach(function(group){ group[1].forEach(function(f){
-    var key = f[0];
-    var num = document.getElementById('in_' + key), rng = document.getElementById('rg_' + key);
-    function onChange(v){ state[key] = parseFloat(v); if (isNaN(state[key])) state[key] = 0;
-      if (num) num.value = state[key]; if (rng) rng.value = state[key]; recompute(); }
-    if (num) num.addEventListener('input', function(){ onChange(num.value); });
-    if (rng) rng.addEventListener('input', function(){ onChange(rng.value); });
+    var key = f[0], type = f[5];
+    var el = document.getElementById('in_' + key), rng = document.getElementById('rg_' + key);
+    if (type === 'bool'){
+      if (el) el.addEventListener('change', function(){ state[key] = el.checked; recompute(); });
+    } else if (type === 'text'){
+      if (el) el.addEventListener('input', function(){ state[key] = el.value; recompute(); });
+    } else {
+      function onChange(v){ state[key] = parseFloat(v); if (isNaN(state[key])) state[key] = 0;
+        if (el) el.value = state[key]; if (rng) rng.value = state[key]; recompute(); }
+      if (el) el.addEventListener('input', function(){ onChange(el.value); });
+      if (rng) rng.addEventListener('input', function(){ onChange(rng.value); });
+    }
   }); });
 }
 function recompute(){ render(computeProjection(state)); }
