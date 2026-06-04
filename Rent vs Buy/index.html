@@ -67,6 +67,7 @@ function splitBudget(effBuy, effRent){
   var b = Math.max(effBuy, effRent);
   return { budget: b, buyInvest: b - effBuy, rentInvest: b - effRent };
 }
+// deductionCap (when >0) caps the excess above standardDeduction — a calculator simplification, not the exact IRS SALT mechanic.
 function annualTaxCredit(yearInterest, yearPropertyTax, p){
   var deductible = (p.interestDeductible ? yearInterest : 0) + (p.propertyTaxDeductible ? yearPropertyTax : 0);
   var excess = Math.max(0, deductible - p.standardDeduction);
@@ -86,6 +87,7 @@ function findCrossings(delta){
   }
   return out;
 }
+// snapshot* take cg as a capital-gains rate in DECIMAL form (e.g. 0.15), unlike annualTaxCredit which takes a percent.
 function snapshotBuy(homeValue, balance, price, closing, inp, cg, portfolio, contrib){
   var selling = inp.sellingCostsPct / 100 * homeValue;
   var gain = (homeValue - selling) - (price + closing);
@@ -163,9 +165,12 @@ test('annualAdvantage: equal -> 0', function(){
 test('annualAdvantage: double over 10yr -> ~7.18%/yr', function(){
   if (!approx(annualAdvantage(200, 100, 10), 7.177, 1e-2)) throw new Error('got ' + annualAdvantage(200,100,10));
 });
+test('annualAdvantage: negative net worth -> NaN (guarded)', function(){
+  if (!isNaN(annualAdvantage(-50, 100, 10))) throw new Error('expected NaN for negative buy NW');
+});
 test('findCrossings: single buy-ahead crossing', function(){
   var c = findCrossings([-5,-3,-1,2,4]);
-  if (!(c.length === 1 && c[0].toYear === 3 && c[0].direction === 'buy-ahead')) throw new Error(JSON.stringify(c));
+  if (!(c.length === 1 && c[0].fromYear === 2 && c[0].toYear === 3 && c[0].direction === 'buy-ahead')) throw new Error(JSON.stringify(c));
 });
 test('findCrossings: two crossings detected', function(){
   var c = findCrossings([-1, 2, 3, -1]);
@@ -181,6 +186,12 @@ test('snapshotBuy: equity net of selling cost, no taxable gain', function(){
   var inp = { sellingCostsPct:6, homeSaleExclusion:250000 };
   var nw = snapshotBuy(500000, 400000, 500000, 15000, inp, 0.15, 0, 0);
   if (!approx(nw, 500000 - 400000 - 30000, 1e-6)) throw new Error('got ' + nw);
+});
+test('snapshotBuy: taxes home-sale gain above exclusion', function(){
+  // value 900k, balance 100k, basis 309k, selling 6%=54k; gain 846k-309k=537k; taxable 287k; tax 43050 -> 702950
+  var inp = { sellingCostsPct:6, homeSaleExclusion:250000 };
+  var nw = snapshotBuy(900000, 100000, 300000, 9000, inp, 0.15, 0, 0);
+  if (!approx(nw, 702950, 1)) throw new Error('taxable gain path: ' + nw);
 });
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
