@@ -56,6 +56,14 @@
 <script>
 "use strict";
 
+/* ===== 1. ENGINE HELPERS ===== */
+function monthlyPayment(principal, annualRatePct, years){
+  var n = years * 12, r = annualRatePct / 100 / 12;
+  if (r === 0) return principal / n;
+  return principal * r / (1 - Math.pow(1 + r, -n));
+}
+function toMonthly(annualPct){ return Math.pow(1 + annualPct / 100, 1/12) - 1; }
+
 /* ===== 4. TEST HARNESS ===== */
 var TESTS = [];
 function test(name, fn){ TESTS.push({name:name, fn:fn}); }
@@ -77,6 +85,16 @@ function runTests(){
 
 // sample test proves the harness works
 test('harness: approx works', function(){ if (!approx(1, 1.0000001, 1e-3)) throw new Error('approx broken'); });
+
+test('monthlyPayment: 400k @ 6.5% / 30yr', function(){
+  if (!approx(monthlyPayment(400000, 6.5, 30), 2528.27, 0.5)) throw new Error('got ' + monthlyPayment(400000,6.5,30));
+});
+test('monthlyPayment: zero rate', function(){
+  if (!approx(monthlyPayment(120000, 0, 30), 333.3333, 1e-3)) throw new Error('got ' + monthlyPayment(120000,0,30));
+});
+test('toMonthly: 7% compounds back to 7%', function(){
+  if (!approx(Math.pow(1 + toMonthly(7), 12) - 1, 0.07, 1e-9)) throw new Error('bad compounding');
+});
 
 /* ===== UI bootstrap (filled in later tasks) ===== */
 function boot(){ /* UI wired up in Task 10+ */ }
