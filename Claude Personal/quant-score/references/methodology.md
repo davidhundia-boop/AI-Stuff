@@ -51,7 +51,7 @@ grades and a composite verdict. All math lives in scripts/quant_score.py
 | Date | Setting | Value | Reason |
 |---|---|---|---|
 | 2026-06-12 | pillar weights | equal (1,1,1,1,1) | initial; no backtest data |
-| 2026-06-12 | strong_buy threshold | 4.0 | spec amendment (4.5 unattainable); sanity basket confirmed selectivity (1 Strong Buy in 7 names) |
+| 2026-06-12 | strong_buy threshold | 4.0 | spec amendment (4.5 unattainable); sanity basket confirmed selectivity (1 of 7 single-ticker basket names was Strong Buy; 2 Strong Buys across all 8 reference points incl. multi-run MU) |
 | 2026-06-12 | peers.widen_below | 8 (was 10) | widening at 10 polluted peer sets (discount retailers in beverages, fintech in banks); at 8 rosters stay same-industry and every basket name keeps >= 8 peers |
 | 2026-06-12 | winsorize bounds | see CONFIG | initial; no change needed in basket validation |
 
