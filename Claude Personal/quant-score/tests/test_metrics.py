@@ -103,3 +103,63 @@ def test_median():
     assert qs._median([3, 1, 2]) == 2
     assert qs._median([1, 2, 3, 4]) == 2.5
     assert qs._median([]) is None
+
+
+import pandas as pd
+import numpy as np
+
+
+def _closes(days=300):
+    """Synthetic close prices: WIN doubles linearly, FLAT stays at 100."""
+    idx = pd.bdate_range(end="2026-06-12", periods=days)
+    return pd.DataFrame({
+        "WIN": np.linspace(100, 200, days),
+        "FLAT": np.full(days, 100.0),
+    }, index=idx)
+
+
+def test_momentum_winner_beats_flat():
+    closes = _closes()
+    win = qs.momentum_metrics(closes, "WIN")
+    flat = qs.momentum_metrics(closes, "FLAT")
+    assert win["ret_6m"] > flat["ret_6m"]
+    assert win["dist_52wk_high"] == 0.0      # at its high = best
+    assert flat["ret_3m"] == 0.0
+
+
+def test_momentum_short_history_drops_long_windows():
+    closes = _closes(days=80)                # ~4 months of data
+    m = qs.momentum_metrics(closes, "WIN")
+    assert m["ret_3m"] is not None
+    assert m["ret_12m"] is None              # IPO <1y: window dropped
+    assert m["dist_52wk_high"] is not None
+
+
+def test_momentum_unknown_symbol():
+    m = qs.momentum_metrics(_closes(), "NOPE")
+    assert all(v is None for v in m.values())
+    m2 = qs.momentum_metrics(None, "WIN")
+    assert all(v is None for v in m2.values())
+
+
+def test_revisions_metrics():
+    eps_trend = {
+        "0y": {"current": 1.10, "90daysAgo": 1.00},
+        "+1y": {"current": 1.50, "90daysAgo": 1.60},
+    }
+    eps_revisions = {  # yfinance mixes capitalization: downLast7Days
+        "0y": {"upLast7days": 2, "upLast30days": 4,
+               "downLast30days": 1, "downLast7Days": 1},
+    }
+    m = qs.revisions_metrics(eps_trend, eps_revisions)
+    assert abs(m["delta_fy0"] - 0.10) < 1e-9
+    assert m["delta_fy1"] < 0
+    assert abs(m["breadth"] - (6 - 2) / 8) < 1e-9
+
+
+def test_revisions_metrics_missing_data():
+    m = qs.revisions_metrics(None, None)
+    assert m == {"delta_fy0": None, "delta_fy1": None, "breadth": None}
+    m2 = qs.revisions_metrics({"0y": {}}, {"0y": {}})
+    assert m2["delta_fy0"] is None
+    assert m2["breadth"] is None

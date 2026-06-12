@@ -307,14 +307,53 @@ def profitability_metrics(info):
 
 
 def momentum_metrics(closes, sym):
-    """Implemented in full in Task 6; see there. Returns all-None until then."""
-    return {**{k: None for k in CONFIG["momentum_windows"]},
-            "dist_52wk_high": None}
+    """Trailing returns over 3/6/9/12 months plus distance from 52-week
+    high (0 = at the high = best; more negative = further below).
+    Returns are ranked vs peers later, making them sector-relative.
+    Missing windows (IPO < 1y) stay None and are dropped by score_pillar."""
+    m = {**{k: None for k in CONFIG["momentum_windows"]},
+         "dist_52wk_high": None}
+    if closes is None or sym not in getattr(closes, "columns", []):
+        return m
+    s = closes[sym].dropna()
+    if s.empty:
+        return m
+    for name, days in CONFIG["momentum_windows"].items():
+        if len(s) > days:
+            m[name] = float(s.iloc[-1] / s.iloc[-1 - days] - 1)
+    tail = s.tail(252)
+    if len(tail):
+        m["dist_52wk_high"] = float(s.iloc[-1] / tail.max() - 1)
+    return m
 
 
 def revisions_metrics(eps_trend, eps_revisions):
-    """Implemented in full in Task 6; see there."""
-    return {"delta_fy0": None, "delta_fy1": None, "breadth": None}
+    """eps_trend: {'0y': {'current':..,'90daysAgo':..}, '+1y': {...}}
+    eps_revisions: {'0y': {'upLast7days':..,'downLast7Days':..,...}}
+    (plain dicts, as cached by fetch_snapshot). Key lookup for breadth is
+    case-insensitive because yfinance mixes capitalization."""
+    m = {"delta_fy0": None, "delta_fy1": None, "breadth": None}
+    if eps_trend:
+        r0 = eps_trend.get("0y") or {}
+        r1 = eps_trend.get("+1y") or {}
+        m["delta_fy0"] = estimate_delta(_num(r0.get("current")),
+                                        _num(r0.get("90daysAgo")))
+        m["delta_fy1"] = estimate_delta(_num(r1.get("current")),
+                                        _num(r1.get("90daysAgo")))
+    if eps_revisions:
+        row = eps_revisions.get("0y") or {}
+
+        def g(name):
+            for k, v in row.items():
+                if k.lower() == name.lower():
+                    return _num(v) or 0
+            return 0
+
+        up = g("upLast7days") + g("upLast30days")
+        down = g("downLast7days") + g("downLast30days")
+        total = up + down
+        m["breadth"] = (up - down) / total if total else None
+    return m
 
 
 def build_all_metrics(snap, closes, sym):
