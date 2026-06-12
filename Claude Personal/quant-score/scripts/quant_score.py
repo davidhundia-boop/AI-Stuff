@@ -156,3 +156,71 @@ def estimate_delta(current, ago):
             return None
     denom = max(abs(ago), 0.01)
     return max(-2.0, min(2.0, (current - ago) / denom))
+
+
+def score_pillar(metric_pcts, weights=None):
+    """Weighted mean of a pillar's metric percentiles.
+
+    metric_pcts: dict name -> percentile (0-100) or None (dropped; its
+    weight is redistributed). Fewer than 2 usable metrics -> (None, used).
+    Returns (pillar_percentile, sorted_used_metric_names).
+    """
+    usable = {k: v for k, v in metric_pcts.items() if v is not None}
+    if len(usable) < 2:
+        return None, sorted(usable)
+    if weights is None:
+        weights = {}
+    total = sum(weights.get(k, 1.0) for k in usable)
+    score = sum(v * weights.get(k, 1.0) for k, v in usable.items()) / total
+    return score, sorted(usable)
+
+
+def composite_score(pillar_scores, weights):
+    """Weighted mean of pillar percentiles -> 1.0-5.0 score.
+
+    N/A pillars are excluded with weights renormalized. Two or more N/A
+    pillars -> (None, na_list): not enough signal for any verdict.
+    """
+    na = sorted(p for p, v in pillar_scores.items() if v is None)
+    if len(na) >= 2:
+        return None, na
+    avail = {p: v for p, v in pillar_scores.items() if v is not None}
+    total = sum(weights[p] for p in avail)
+    mean_pct = sum(v * weights[p] for p, v in avail.items()) / total
+    return 1 + 4 * mean_pct / 100.0, na
+
+
+def decide_verdict(composite, pillar_scores):
+    """Map composite to verdict, applying Strong Buy pillar floor and the
+    Value circuit breaker. Returns (verdict, notes)."""
+    if composite is None:
+        na = sorted(p for p, v in pillar_scores.items() if v is None)
+        return "NO VERDICT", [
+            f"Insufficient data: pillars N/A: {', '.join(na)}"]
+    t = CONFIG["verdict"]
+    if composite >= t["strong_buy"]:
+        base = "Strong Buy"
+    elif composite >= t["buy"]:
+        base = "Buy"
+    elif composite >= t["hold"]:
+        base = "Hold"
+    elif composite >= t["sell"]:
+        base = "Sell"
+    else:
+        base = "Strong Sell"
+    notes = []
+    if base == "Strong Buy":
+        floor = CONFIG["strong_buy_pillar_floor"]
+        weak = sorted(p for p, v in pillar_scores.items()
+                      if v is not None and v < floor)
+        if weak:
+            base = "Buy"
+            notes.append("Demoted from Strong Buy: pillar(s) below C-: "
+                         + ", ".join(weak))
+    v_pct = pillar_scores.get("value")
+    if (v_pct is not None and v_pct < CONFIG["value_circuit_breaker"]
+            and base in ("Strong Buy", "Buy")):
+        base = "Hold"
+        notes.append("Value circuit breaker: valuation D+ or worse "
+                     "caps verdict at Hold")
+    return base, notes

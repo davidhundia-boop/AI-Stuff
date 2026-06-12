@@ -86,3 +86,86 @@ def test_estimate_delta_missing():
     assert qs.estimate_delta(None, 1.0) is None
     assert qs.estimate_delta(1.0, None) is None
     assert qs.estimate_delta(float("nan"), 1.0) is None
+
+
+def test_score_pillar_weighted_mean():
+    score, used = qs.score_pillar({"a": 80.0, "b": 40.0})
+    assert score == 60.0
+    assert used == ["a", "b"]
+
+
+def test_score_pillar_redistributes_dropped_metrics():
+    score, used = qs.score_pillar({"a": 80.0, "b": None, "c": 40.0})
+    assert score == 60.0
+    assert used == ["a", "c"]
+
+
+def test_score_pillar_custom_weights():
+    score, _ = qs.score_pillar({"a": 100.0, "b": 0.0}, {"a": 3, "b": 1})
+    assert score == 75.0
+
+
+def test_score_pillar_under_two_metrics_is_na():
+    score, _ = qs.score_pillar({"a": 80.0, "b": None})
+    assert score is None
+
+
+def test_composite_equal_weights():
+    scores = {"value": 80, "growth": 80, "profitability": 80,
+              "momentum": 80, "revisions": 80}
+    comp, na = qs.composite_score(scores, qs.CONFIG["pillar_weights"])
+    assert abs(comp - 4.2) < 1e-9
+    assert na == []
+
+
+def test_composite_renormalizes_one_na():
+    scores = {"value": 60, "growth": 60, "profitability": 60,
+              "momentum": 60, "revisions": None}
+    comp, na = qs.composite_score(scores, qs.CONFIG["pillar_weights"])
+    assert abs(comp - 3.4) < 1e-9
+    assert na == ["revisions"]
+
+
+def test_composite_two_na_no_verdict():
+    scores = {"value": 90, "growth": 90, "profitability": 90,
+              "momentum": None, "revisions": None}
+    comp, na = qs.composite_score(scores, qs.CONFIG["pillar_weights"])
+    assert comp is None
+    assert sorted(na) == ["momentum", "revisions"]
+
+
+def test_verdict_strong_buy():
+    scores = {p: 80.0 for p in qs.PILLARS}
+    v, notes = qs.decide_verdict(4.2, scores)
+    assert v == "Strong Buy"
+    assert notes == []
+
+
+def test_verdict_demoted_when_pillar_below_floor():
+    scores = {p: 90.0 for p in qs.PILLARS}
+    scores["revisions"] = 40.0  # below C- floor (45)
+    v, notes = qs.decide_verdict(4.1, scores)
+    assert v == "Buy"
+    assert any("emoted" in n for n in notes)
+
+
+def test_verdict_value_circuit_breaker_caps_at_hold():
+    scores = {p: 95.0 for p in qs.PILLARS}
+    scores["value"] = 40.0  # D+ or worse
+    v, notes = qs.decide_verdict(4.4, scores)
+    assert v == "Hold"
+    assert any("circuit breaker" in n.lower() for n in notes)
+
+
+def test_verdict_bands():
+    mid = {p: 50.0 for p in qs.PILLARS}
+    assert qs.decide_verdict(3.6, mid)[0] == "Buy"
+    assert qs.decide_verdict(3.0, mid)[0] == "Hold"
+    assert qs.decide_verdict(2.0, mid)[0] == "Sell"
+    assert qs.decide_verdict(1.2, mid)[0] == "Strong Sell"
+
+
+def test_verdict_none_composite():
+    v, notes = qs.decide_verdict(None, {p: None for p in qs.PILLARS})
+    assert v == "NO VERDICT"
+    assert any("insufficient" in n.lower() for n in notes)
