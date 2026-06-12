@@ -726,3 +726,82 @@ def run(sym, refresh=False):
         "flags": flags,
     })
     return result
+
+
+# ------------------------------------------------------------------- rendering
+
+def render_text(r):
+    w = 72
+    lines = ["=" * w]
+    lines.append(f"QUANT SCORE: {r['ticker']} ({r['name']})  "
+                 f"-  snapshot {r['date']}")
+    shown = ", ".join(r["peers"][:12]) + ("..." if r["peer_count"] > 12
+                                          else "")
+    lines.append(f"Peer set [{r['industry']}], {r['peer_count']} peers: "
+                 f"{shown}")
+    lines.append("=" * w)
+    lines.append(f"{'PILLAR':<15}{'GRADE':<7}{'PCTL':<6}EVIDENCE")
+    for p in PILLARS:
+        d = r["pillars"][p]
+        pct = f"{d['percentile']:.0f}" if d["percentile"] is not None \
+            else "--"
+        lines.append(f"{p.title():<15}{d['grade']:<7}{pct:<6}{d['evidence']}")
+    lines.append("-" * w)
+    if r["composite"] is not None:
+        lines.append(f"COMPOSITE: {r['composite']:.2f} / 5.00  ->  "
+                     f"{r['verdict'].upper()}")
+    else:
+        lines.append(f"COMPOSITE: N/A  ->  {r['verdict']}")
+    for f in r["flags"]:
+        lines.append(f"  [!] {f}")
+    return "\n".join(lines)
+
+
+def render_ranked_table(results):
+    lines = ["", "RANKED COMPARISON", f"{'TICKER':<8}{'COMPOSITE':<11}"
+             f"{'VERDICT':<13}" + "".join(f"{p[:4].upper():<6}"
+                                          for p in PILLARS)]
+    ordered = sorted(results, key=lambda r: (r["composite"] is None,
+                                             -(r["composite"] or 0)))
+    for r in ordered:
+        comp = f"{r['composite']:.2f}" if r["composite"] is not None \
+            else "N/A"
+        grades = "".join(f"{r['pillars'][p]['grade']:<6}" for p in PILLARS)
+        lines.append(f"{r['ticker']:<8}{comp:<11}{r['verdict']:<13}{grades}")
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Alpha Picks-style five-pillar quant scorer")
+    parser.add_argument("tickers", nargs="+", help="US stock ticker(s)")
+    parser.add_argument("--json", action="store_true",
+                        help="machine-readable output")
+    parser.add_argument("--refresh", action="store_true",
+                        help="bypass same-day cache")
+    args = parser.parse_args()
+    purge_cache()
+    results, errors = [], []
+    for sym in args.tickers:
+        try:
+            results.append(run(sym, refresh=args.refresh))
+        except ValueError as e:
+            errors.append(f"SKIP {sym.upper()}: {e}")
+        except Exception as e:
+            errors.append(f"ERROR {sym.upper()}: {e}")
+    if args.json:
+        print(json.dumps(results, indent=2, default=str))
+    else:
+        for r in results:
+            print(render_text(r))
+            print()
+        if len(results) > 1:
+            print(render_ranked_table(results))
+    for e in errors:
+        print(e, file=sys.stderr)
+    if not results:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
