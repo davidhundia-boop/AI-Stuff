@@ -46,6 +46,37 @@ grades and a composite verdict. All math lives in scripts/quant_score.py
   verdict at Hold.
 - Universe violations warn but do not block scoring.
 
+### Interpreting the composite (read this)
+
+The composite is an **ordinal rank tier** — "how this stock ranks against
+its ~50-name cohort right now" — not a backtested or calibrated
+probability. Pillar weights are equal and the verdict cuts are hand-set
+(see Known Limitations). Do not over-read a 3.2 Hold as a considered
+neutral call: a stock at the exact median of every pillar lands at
+composite 3.0, and **Hold is a wide band (2.5-3.5, i.e. 37.5th-62.5th
+pctl)** while Strong Sell (<1.5) is nearly unreachable. Trust the relative
+ranking and the pillar grades; treat the Buy/Sell label as a tier, and
+always read the flags and David-Fit/Caveats sections before acting.
+
+## Non-Scoring Flags
+
+These surface mechanically in `flags` (rendered `[!]`); they never change a
+grade or the verdict. They exist so the interpreter can't forget to mention
+the trap, and so the David-Fit overlay's hard rules are robust to LLM recall.
+
+- **Peak-earnings / cyclical-top** (`peak_earnings_flag`): fires when the
+  forward P/E ranks top-decile cheap, trailing P/E is >= 1.5x the forward
+  P/E (so the cheapness is a rising-estimate artifact), AND FY revisions are
+  top-decile. Addresses the system's structural blindness to cyclicality —
+  e.g. MU's 8.8x forward P/E is "cheap on peak earnings," not durable value.
+- **Peer-set cap mismatch** (`cap_mismatch_flag`): fires when the peer
+  median market cap is >10x or <1/10x the target's — the grades are then
+  drawn against a different size class (small-cap target vs mega-cap primes).
+  Output also lists the 4 largest peers by cap so the cohort is auditable.
+- **Extreme valuation** (`extreme_valuation_flags`): objective flags for
+  trailing P/E > 100 and market cap < $1B. The David-Fit overlay maps these
+  to its hard rules (HARD PASS / lottery-ticket) so they fire mechanically.
+
 ## Calibration Log
 
 | Date | Setting | Value | Reason |
@@ -54,6 +85,7 @@ grades and a composite verdict. All math lives in scripts/quant_score.py
 | 2026-06-12 | strong_buy threshold | 4.0 | spec amendment (4.5 unattainable); sanity basket confirmed selectivity (1 of 7 single-ticker basket names was Strong Buy; 2 Strong Buys across all 8 reference points incl. multi-run MU) |
 | 2026-06-12 | peers.widen_below | 8 (was 10) | widening at 10 polluted peer sets (discount retailers in beverages, fintech in banks); at 8 rosters stay same-industry and every basket name keeps >= 8 peers |
 | 2026-06-12 | winsorize bounds | see CONFIG | initial; no change needed in basket validation |
+| 2026-06-12 | non-scoring flags added | peak_earnings / cap_mismatch / extreme_valuation | post-audit (REVIEW-2026-06-12): surface cyclicality blindness, invisible peer-set, and David hard rules mechanically. Flags only — composite math unchanged. Verified: peak-earnings fires on MU, not on CRM/RDW/AVAV; cap-mismatch fires on MU (target 102x peer median) |
 
 ## Validated Reference Points (2026-06-12 basket)
 
@@ -72,7 +104,16 @@ grades and a composite verdict. All math lives in scripts/quant_score.py
 - Industry classification comes from yfinance: occasional odd cohabitants
   (e.g. quantum-computing names classified under computer-hardware) are a
   data artifact, not a widening bug.
-- Pillar weights are not back-tested.
+- Pillar weights are not back-tested, and the system is structurally blind
+  to cyclicality: at a cycle peak, peak earnings (cheap forward P/E), rising
+  estimates, and strong momentum coincide, so the highest scores can land at
+  the highest forward risk (the MU case). The `peak_earnings` flag surfaces
+  the clearest instances mechanically, but the composite itself cannot see
+  the cycle — read the flag and the cyclical-risk caveat.
+- Not backtest-safe: peers and fundamentals are always today's roster /
+  latest TTM-forward consensus (survivorship-biased, no point-in-time
+  reconstruction). Scoring a past date with this code would silently use the
+  current cohort. It is a current-snapshot ranker, not a backtester.
 - Intraday .info values vary between first runs at different times of
   day; determinism holds within a snapshot day (cache), and the snapshot
   date is stamped in output.

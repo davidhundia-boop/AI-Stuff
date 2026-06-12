@@ -6,8 +6,11 @@ Pillars: Value, Growth, Profitability, Momentum, EPS Revisions.
 Every metric is percentile-ranked against an industry peer set
 (sector-relative), mapped to letter grades (A+..F), combined into a
 1.0-5.0 composite and a verdict (Strong Buy / Buy / Hold / Sell /
-Strong Sell). Deterministic: same-day re-runs hit a snapshot cache and
-return identical results.
+Strong Sell). Deterministic per snapshot: same-day re-runs hit the cache
+and return identical results; first-run .info values can still drift
+intraday with the data source. The composite is an ORDINAL rank tier
+(how this stock ranks vs its cohort), not a backtested/calibrated score,
+and the tool is not backtest-safe (it always uses today's peer roster).
 
 Usage:
   python quant_score.py SNDK
@@ -70,7 +73,19 @@ CONFIG = {
         "rev_cagr_3y": (-1, 2), "fwd_eps_growth": (-2, 2),
         "gross_margin": (-1, 1), "op_margin": (-2, 1), "net_margin": (-2, 1),
         "roe": (-2, 3), "roa": (-1, 1), "fcf_margin": (-2, 1),
+        # delta_fy0/fy1 intentionally have NO entry here: estimate_delta()
+        # already clamps them to [-2, 2] before ranking, which IS their
+        # winsorization. Do not add a bound here (would double-clamp).
     },
+    # Peak-earnings / cyclical-top detector (non-scoring flag only).
+    "peak_earnings": {"fwd_pe_top_pct": 90.0,   # forward P/E looks top-decile cheap
+                      "trailing_fwd_ratio": 1.5,  # trailing P/E >= 1.5x forward P/E
+                      "rev_top_pct": 90.0},      # FY revisions top-decile
+    # Flag when peer-set median cap diverges from the target by this factor.
+    "cap_mismatch_ratio": 10.0,
+    # Objective extreme-valuation flags (the David-fit overlay reads these
+    # so its hard rules are mechanical, not LLM-recall-dependent).
+    "extreme_pe": 100.0, "small_cap": 1e9,
     "grade_bands": [(97, "A+"), (93, "A"), (90, "A-"), (85, "B+"),
                     (75, "B"), (65, "B-"), (58, "C+"), (51, "C"),
                     (45, "C-"), (38, "D+"), (32, "D"), (25, "D-"), (0, "F")],
@@ -225,6 +240,75 @@ def decide_verdict(composite, pillar_scores):
                      "caps verdict at Hold")
     return base, notes
 
+
+def peak_earnings_flag(pillars_out):
+    """Non-scoring cyclical-top detector. A low forward P/E is unambiguously
+    'good' to the Value pillar, but it can mean either 'genuinely cheap' or
+    'consensus is extrapolating an unsustainable earnings spike'. When the
+    forward multiple ranks top-decile cheap, trailing P/E is materially
+    higher than forward (so the cheapness is an estimate artifact), AND FY
+    revisions are top-decile, surface the peak-earnings signature mechanically
+    instead of relying on the interpreter to notice it (the MU case).
+    Returns a flag string or None."""
+    cfg = CONFIG["peak_earnings"]
+    val = pillars_out.get("value", {}).get("metrics", {})
+    rev = pillars_out.get("revisions", {}).get("metrics", {})
+    fpe, tpe = val.get("forward_pe", {}), val.get("trailing_pe", {})
+    if (fpe.get("pct") or 0) < cfg["fwd_pe_top_pct"]:
+        return None
+    fpe_v, tpe_v = fpe.get("value"), tpe.get("value")
+    forward_much_cheaper = (
+        isinstance(fpe_v, (int, float)) and isinstance(tpe_v, (int, float))
+        and fpe_v > 0 and tpe_v / fpe_v >= cfg["trailing_fwd_ratio"])
+    rev_hot = any((rev.get(k, {}).get("pct") or 0) >= cfg["rev_top_pct"]
+                  for k in ("delta_fy0", "delta_fy1"))
+    if forward_much_cheaper and rev_hot:
+        return ("Forward multiple built on sharply rising estimates "
+                "(forward P/E << trailing P/E, revisions top-decile) - "
+                "possible peak-earnings / cyclical-top signature; the cheap "
+                "forward P/E is an estimate artifact, not durable value")
+    return None
+
+
+def cap_mismatch_flag(target_cap, peer_caps):
+    """Flag when the peer-set median market cap is >Nx or <1/Nx the target's:
+    the grades are then drawn against a different size class (e.g. a small-cap
+    target ranked against mega-cap primes). peer_caps: list of caps (floats).
+    Returns a flag string or None."""
+    target_cap = _num(target_cap)
+    pool = [c for c in (peer_caps or []) if _num(c)]
+    if not target_cap or len(pool) < 2:
+        return None
+    med = _median(pool)
+    if not med:
+        return None
+    ratio = med / target_cap
+    n = CONFIG["cap_mismatch_ratio"]
+    if ratio > n:
+        rel = f"peer median market cap is {ratio:.0f}x the target"
+    elif ratio < 1 / n:
+        rel = f"target is {1 / ratio:.0f}x the peer median market cap"
+    else:
+        return None
+    return (f"Peer-set cap mismatch: {rel} - grades are vs a different "
+            f"size class")
+
+
+def extreme_valuation_flags(info):
+    """Objective extreme-valuation flags the David-fit overlay maps to its
+    hard rules (so 'P/E > 100 -> HARD PASS' and 'cap < $1B' are mechanical,
+    not dependent on the interpreter re-reading david-fit.md each run)."""
+    flags = []
+    pe = _num(info.get("trailingPE"))
+    if pe is not None and pe > CONFIG["extreme_pe"]:
+        flags.append(f"Extreme trailing valuation: P/E {pe:.0f} > "
+                     f"{CONFIG['extreme_pe']:.0f}")
+    cap = _num(info.get("marketCap"))
+    if cap and cap < CONFIG["small_cap"]:
+        flags.append(f"Small cap: market cap "
+                     f"${cap / 1e9:.2f}B < ${CONFIG['small_cap'] / 1e9:.0f}B")
+    return flags
+
 # ---------------------------------------------------------- metric extraction
 
 def _num(x):
@@ -235,6 +319,14 @@ def _num(x):
     if isinstance(x, (int, float)) and not math.isnan(x):
         return float(x)
     return None
+
+
+def _numf(x, fallback):
+    """_num(x), but returns `fallback` only when x is genuinely unusable.
+    Preserves a legitimate 0.0, which a bare `_num(x) or fallback` chain
+    would silently discard (0.0 is falsy)."""
+    n = _num(x)
+    return n if n is not None else fallback
 
 
 def _pos(x):
@@ -256,18 +348,22 @@ def value_metrics(info):
     book) -> WORST sentinel; genuine coverage gaps -> None (dropped)."""
     eps_ttm = info.get("trailingEps")
     fcf, mcap = _num(info.get("freeCashflow")), _num(info.get("marketCap"))
-    peg = _num(info.get("trailingPegRatio")) or _num(info.get("pegRatio"))
+    peg = _num(info.get("trailingPegRatio"))
+    if peg is None:
+        peg = _num(info.get("pegRatio"))
     ebitda = info.get("ebitda")
+    # _numf (not `or`) so a legitimate ratio of exactly 0.0 isn't dropped
+    # to the structural-worst fallback.
     m = {
-        "trailing_pe": _num(info.get("trailingPE"))
-                       or (None if _pos(eps_ttm) else WORST),
-        "forward_pe": _num(info.get("forwardPE"))
-                      or (None if _pos(info.get("forwardEps")) else WORST),
-        "peg": peg or (None if _pos(eps_ttm) else WORST),
+        "trailing_pe": _numf(info.get("trailingPE"),
+                             None if _pos(eps_ttm) else WORST),
+        "forward_pe": _numf(info.get("forwardPE"),
+                            None if _pos(info.get("forwardEps")) else WORST),
+        "peg": peg if peg is not None else (None if _pos(eps_ttm) else WORST),
         "ps": _num(info.get("priceToSalesTrailing12Months")),
         "pb": _num(info.get("priceToBook")),
-        "ev_ebitda": _num(info.get("enterpriseToEbitda"))
-                     or (None if (ebitda is None or _pos(ebitda)) else WORST),
+        "ev_ebitda": _numf(info.get("enterpriseToEbitda"),
+                           None if (ebitda is None or _pos(ebitda)) else WORST),
         "fcf_yield": (fcf / mcap) if (fcf is not None and mcap) else None,
     }
     # Any negative lower-is-better ratio means a negative denominator
@@ -679,6 +775,9 @@ def score_ticker(sym, snaps, closes):
         }
     comp, na = composite_score(pillar_scores, CONFIG["pillar_weights"])
     verdict, notes = decide_verdict(comp, pillar_scores)
+    peak = peak_earnings_flag(pillars_out)
+    if peak:
+        notes = notes + [peak]
     return {"pillars": pillars_out, "pillar_scores": pillar_scores,
             "composite": comp, "verdict": verdict, "notes": notes,
             "na_pillars": na}
@@ -705,10 +804,21 @@ def run(sym, refresh=False):
     result = score_ticker(sym, snaps, closes)
     flags = list(result.pop("notes"))
     flags += universe_flags(info)
+    flags += extreme_valuation_flags(info)
     peer_count = len(snaps) - 1
     if peer_count < CONFIG["peers"]["min"]:
         flags.append(f"LOW CONFIDENCE: only {peer_count} peers after "
                      "filtering")
+    # Peer-set auditability: surface size-class mismatch + name the biggest
+    # peers so the cohort the grades are drawn against is visible.
+    peer_caps = [(p, _num(snaps[p]["info"].get("marketCap")))
+                 for p in snaps if p != sym]
+    peer_caps = [(p, c) for p, c in peer_caps if c]
+    mismatch = cap_mismatch_flag(info.get("marketCap"),
+                                 [c for _, c in peer_caps])
+    if mismatch:
+        flags.append(mismatch)
+    largest_peers = [p for p, _ in sorted(peer_caps, key=lambda x: -x[1])[:4]]
     if (info.get("industryKey") or "").startswith("reit"):
         flags.append("REIT: P/FFO unavailable in data source; valuation "
                      "uses standard metrics only")
@@ -722,6 +832,7 @@ def run(sym, refresh=False):
         "industry": info.get("industryKey"),
         "sector": info.get("sectorKey"),
         "peers": sorted(p for p in snaps if p != sym),
+        "largest_peers": largest_peers,
         "peer_count": peer_count,
         "flags": flags,
     })
@@ -739,6 +850,8 @@ def render_text(r):
                                           else "")
     lines.append(f"Peer set [{r['industry']}], {r['peer_count']} peers: "
                  f"{shown}")
+    if r.get("largest_peers"):
+        lines.append(f"Largest peers by cap: {', '.join(r['largest_peers'])}")
     lines.append("=" * w)
     lines.append(f"{'PILLAR':<15}{'GRADE':<7}{'PCTL':<6}EVIDENCE")
     for p in PILLARS:

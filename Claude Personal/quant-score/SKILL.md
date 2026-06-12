@@ -35,7 +35,14 @@ interpretation, the David-fit overlay, and the saved report.
   explicitly decline a verdict -- never invent one.
 - `SKIP`/`ERROR` lines on stderr: relay the reason (e.g. ETFs and
   non-US-equities are not scoreable).
-- Flags prefixed `[!]` must appear in the report's caveats section.
+- Flags prefixed `[!]` must appear in the report's caveats section. Three
+  are mechanical (see methodology.md "Non-Scoring Flags"): **peak-earnings /
+  cyclical-top** (treat a Strong Buy carrying this flag as a momentum trade
+  with an exit plan, NOT a durable-value buy -- the MU case), **peer-set cap
+  mismatch** (grades are vs a different size class), and **extreme valuation**
+  (P/E > 100 -> David HARD PASS; cap < $1B -> lottery-ticket per david-fit.md).
+- The composite is an ordinal rank tier, not a calibrated score; Hold is a
+  wide band. Lead with pillar grades + flags, not the bare verdict word.
 - Sector-relative context matters when explaining: a momentum F can mean
   "the peer group ran harder", not "the stock fell" (see methodology.md
   Validated Reference Points).
@@ -45,4 +52,6 @@ interpretation, the David-fit overlay, and the saved report.
 Source of truth: `D:\AI Stuff\Claude Personal\quant-score\` (git).
 Edit there, run tests (`python -m pytest quant-score/tests`), then copy
 to this directory. Calibration changes go in CONFIG and are logged in
-`references/methodology.md`.
+`references/methodology.md`. **The deployed copy ships no tests -- never
+edit it directly; edit source, run tests, then copy.** Latest audit:
+`REVIEW-2026-06-12.md`.

@@ -68,6 +68,22 @@ def test_value_metrics_negative_ratio_becomes_worst():
     assert qs.value_metrics(info)["trailing_pe"] == qs.WORST
 
 
+def test_value_metrics_zero_pe_is_worst_not_silently_dropped():
+    # B1 regression guard. Before the _numf fix, `_num(0.0) or fallback`
+    # discarded an exact-0.0 P/E to None (dropped, pillar reweighted).
+    # Now it's preserved and the negative-ratio sweep classifies it WORST
+    # (a P/E of 0 implies a ~worthless price -> ranked worst, not vanished).
+    info = dict(PROFITABLE, trailingPE=0.0)
+    assert qs.value_metrics(info)["trailing_pe"] == qs.WORST
+
+
+def test_numf_preserves_zero_but_falls_back_on_none():
+    assert qs._numf(0.0, "FB") == 0.0
+    assert qs._numf(None, "FB") == "FB"
+    assert qs._numf(float("nan"), "FB") == "FB"
+    assert qs._numf(5.0, "FB") == 5.0
+
+
 def test_growth_metrics():
     m = qs.growth_metrics(PROFITABLE, rev_series=[100.0, 150.0, 200.0, 250.0])
     assert m["rev_growth"] == 0.30
@@ -194,6 +210,72 @@ def test_evidence_str_structural_worst():
 
 def test_evidence_str_empty():
     assert qs.evidence_str({}) == "insufficient data"
+
+
+# --- peer-set construction (data-assembly layer) ---------------------------
+# _filter_universe is the most consequential and previously-untested logic:
+# the EQUITY gate, cap/price universe filters, name-dedupe, and target/taken
+# exclusion all run here. fetch_info is monkeypatched so no network is hit.
+
+UNIVERSE = {
+    "AAA": {"quoteType": "EQUITY", "marketCap": 50e9, "currentPrice": 100.0,
+            "longName": "Alpha Alpha Inc"},
+    "BBB": {"quoteType": "EQUITY", "marketCap": 20e9, "currentPrice": 40.0,
+            "longName": "Beta Beta Corporation"},
+    "ETF": {"quoteType": "ETF", "marketCap": 80e9, "currentPrice": 400.0,
+            "longName": "Some Index Fund"},
+    "TINY": {"quoteType": "EQUITY", "marketCap": 100e6, "currentPrice": 30.0,
+             "longName": "Tiny Co"},               # below $500M cap
+    "CHEAP": {"quoteType": "EQUITY", "marketCap": 5e9, "currentPrice": 4.0,
+              "longName": "Penny Co"},             # below $10 price
+    "BBB_DUP": {"quoteType": "EQUITY", "marketCap": 19e9, "currentPrice": 41.0,
+                "longName": "Beta Beta Corp"},     # dup name of BBB
+    "NOPRICE": {"quoteType": "EQUITY", "marketCap": 8e9,
+                "regularMarketPrice": 25.0, "longName": "Fallback Price Co"},
+}
+
+
+def _patch_fetch_info(monkeypatch):
+    monkeypatch.setattr(qs, "fetch_info",
+                        lambda s, refresh=False: UNIVERSE.get(s, {}))
+
+
+def test_filter_universe_basic_pass(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    out = qs._filter_universe(["AAA", "BBB"], "", set(), set())
+    assert out == ["AAA", "BBB"]
+
+
+def test_filter_universe_excludes_target_and_taken(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    out = qs._filter_universe(["AAA", "BBB"], "AAA", set(), {"BBB"})
+    assert out == []                                # AAA=target, BBB=taken
+
+
+def test_filter_universe_drops_non_equity_and_universe_violations(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    out = qs._filter_universe(["ETF", "TINY", "CHEAP", "AAA"], "",
+                              set(), set())
+    assert out == ["AAA"]                           # ETF/TINY/CHEAP all dropped
+
+
+def test_filter_universe_dedupes_by_normalized_name(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    out = qs._filter_universe(["BBB", "BBB_DUP"], "", set(), set())
+    assert out == ["BBB"]                           # BBB_DUP is same entity
+
+
+def test_filter_universe_accepts_regular_market_price_fallback(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    out = qs._filter_universe(["NOPRICE"], "", set(), set())
+    assert out == ["NOPRICE"]                       # uses regularMarketPrice
+
+
+def test_filter_universe_mutates_taken_and_seen(monkeypatch):
+    _patch_fetch_info(monkeypatch)
+    taken, seen = set(), set()
+    qs._filter_universe(["AAA"], "", seen, taken)
+    assert "AAA" in taken and qs._norm_name("Alpha Alpha Inc") in seen
 
 
 def test_score_ticker_counts_worst_peers_at_bound():

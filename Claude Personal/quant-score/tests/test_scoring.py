@@ -165,6 +165,96 @@ def test_verdict_bands():
     assert qs.decide_verdict(1.2, mid)[0] == "Strong Sell"
 
 
+def test_verdict_band_edges_are_inclusive_lower_bound():
+    # Thresholds use >=, so a composite landing EXACTLY on a cut takes the
+    # higher tier. CRM landed 3.46 (just under Buy) in the wild -> boundary
+    # behavior is real-world relevant.
+    mid = {p: 50.0 for p in qs.PILLARS}
+    assert qs.decide_verdict(3.5, mid)[0] == "Buy"     # exactly at Buy cut
+    assert qs.decide_verdict(3.4999, mid)[0] == "Hold"  # a hair below
+    assert qs.decide_verdict(2.5, mid)[0] == "Hold"    # exactly at Hold cut
+    assert qs.decide_verdict(2.4999, mid)[0] == "Sell"
+    assert qs.decide_verdict(4.0, {p: 80.0 for p in qs.PILLARS})[0] \
+        == "Strong Buy"                                 # exactly at SB cut
+
+
+def _pillars_with(forward_pct, trailing_pct, fwd_v, trail_v, rev_pct):
+    """Minimal pillars_out shaped like score_ticker's, for flag tests."""
+    return {
+        "value": {"metrics": {
+            "forward_pe": {"pct": forward_pct, "value": fwd_v},
+            "trailing_pe": {"pct": trailing_pct, "value": trail_v},
+        }},
+        "revisions": {"metrics": {
+            "delta_fy0": {"pct": rev_pct},
+            "delta_fy1": {"pct": 20.0},
+        }},
+    }
+
+
+def test_peak_earnings_flag_fires_on_mu_shape():
+    # MU 2026-06-12: fwd P/E 8.8 (100th pctl), trailing P/E 46.5, FY0 rev 98th.
+    p = _pillars_with(100.0, 81.0, 8.8, 46.5, 98.0)
+    f = qs.peak_earnings_flag(p)
+    assert f is not None and "peak-earnings" in f
+
+
+def test_peak_earnings_flag_silent_when_forward_not_top_decile():
+    # CRM shape: fwd P/E only 87.8th pctl -> below the 90 trigger.
+    assert qs.peak_earnings_flag(
+        _pillars_with(87.8, 78.0, 10.7, 19.3, 75.0)) is None
+
+
+def test_peak_earnings_flag_silent_without_trailing_divergence():
+    # Cheap forward AND cheap trailing in absolute terms (ratio < 1.5):
+    # genuinely cheap, not a peak-earnings artifact.
+    assert qs.peak_earnings_flag(
+        _pillars_with(95.0, 95.0, 12.0, 14.0, 95.0)) is None
+
+
+def test_peak_earnings_flag_silent_without_hot_revisions():
+    # Forward cheap + big trailing divergence but revisions NOT top-decile.
+    assert qs.peak_earnings_flag(
+        _pillars_with(95.0, 60.0, 8.0, 40.0, 50.0)) is None
+
+
+def test_peak_earnings_flag_handles_structural_worst_trailing():
+    # Negative trailing earnings (value=None) must not crash or false-fire.
+    p = _pillars_with(95.0, 0.0, 8.0, None, 95.0)
+    assert qs.peak_earnings_flag(p) is None
+
+
+def test_cap_mismatch_flag_fires_when_peers_much_larger():
+    # RDW shape: $3B target vs defense primes whose median is hundreds of B.
+    f = qs.cap_mismatch_flag(3e9, [300e9, 150e9, 90e9, 200e9])
+    assert f is not None and "cap mismatch" in f
+
+
+def test_cap_mismatch_flag_fires_when_peers_much_smaller():
+    # MU shape: $1.1T target vs a median small-cap semi cohort.
+    f = qs.cap_mismatch_flag(1.1e12, [8e9, 12e9, 5e9, 20e9])
+    assert f is not None
+
+
+def test_cap_mismatch_flag_silent_when_comparable():
+    assert qs.cap_mismatch_flag(50e9, [40e9, 60e9, 55e9, 45e9]) is None
+
+
+def test_cap_mismatch_flag_guards_missing_data():
+    assert qs.cap_mismatch_flag(None, [40e9, 60e9]) is None
+    assert qs.cap_mismatch_flag(50e9, [40e9]) is None   # thin pool
+    assert qs.cap_mismatch_flag(50e9, []) is None
+
+
+def test_extreme_valuation_flags():
+    f = qs.extreme_valuation_flags({"trailingPE": 140.0, "marketCap": 600e6})
+    assert any("P/E" in x for x in f)
+    assert any("Small cap" in x for x in f)
+    # clean megacap at a normal multiple -> no flags
+    assert qs.extreme_valuation_flags(
+        {"trailingPE": 22.0, "marketCap": 90e9}) == []
+
+
 def test_verdict_none_composite():
     v, notes = qs.decide_verdict(None, {p: None for p in qs.PILLARS})
     assert v == "NO VERDICT"
