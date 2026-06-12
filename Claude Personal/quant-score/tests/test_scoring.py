@@ -169,3 +169,10 @@ def test_verdict_none_composite():
     v, notes = qs.decide_verdict(None, {p: None for p in qs.PILLARS})
     assert v == "NO VERDICT"
     assert any("insufficient" in n.lower() for n in notes)
+
+
+def test_norm_name_dedupes_corporate_suffixes():
+    assert qs._norm_name("The Bank of New York Mellon Corporation") == \
+        qs._norm_name("Bank of New York Mellon Corp")
+    assert qs._norm_name("Apple Inc.") == qs._norm_name("Apple Inc")
+    assert qs._norm_name(None) == ""
