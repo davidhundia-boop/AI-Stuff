@@ -589,3 +589,140 @@ def resolve_peers(sym, info, refresh=False):
     if pool:
         save_cache(cache_name, pool)
     return [p for p in pool if p != sym.upper()]
+
+
+# --------------------------------------------------------------- orchestration
+
+def universe_flags(info):
+    flags = []
+    if (_num(info.get("marketCap")) or 0) < CONFIG["universe"]["min_cap"]:
+        flags.append("Below Alpha Picks universe: market cap < $500M")
+    price = (_num(info.get("currentPrice"))
+             or _num(info.get("regularMarketPrice")) or 0)
+    if price < CONFIG["universe"]["min_price"]:
+        flags.append("Below Alpha Picks universe: price < $10")
+    return flags
+
+
+def evidence_str(metric_detail, max_items=2):
+    """Headline evidence in Alpha Picks style:
+    'P/E 25.1 vs median 32.0 (-22%)'. Picks the first metrics with data."""
+    parts = []
+    for mname, d in metric_detail.items():
+        label = METRIC_LABELS.get(mname, mname)
+        if d.get("structural_worst"):
+            parts.append(f"{label}: negative (worst)")
+            continue
+        v, med = d.get("value"), d.get("peer_median")
+        if v is None or med is None or d.get("pct") is None:
+            continue
+        if mname in LOWER_IS_BETTER:
+            rel = (v - med) / med * 100 if med else 0
+            parts.append(f"{label} {v:.1f} vs median {med:.1f} ({rel:+.0f}%)")
+        elif abs(v) < 5:  # margins/growth/returns are fractions
+            parts.append(f"{label} {v * 100:.1f}% vs median {med * 100:.1f}%")
+        else:
+            parts.append(f"{label} {v:.1f} vs median {med:.1f}")
+        if len(parts) >= max_items:
+            break
+    return "; ".join(parts[:max_items]) if parts else "insufficient data"
+
+
+def score_ticker(sym, snaps, closes):
+    """Score sym against every other symbol in snaps. Pure given inputs.
+
+    Peers whose metric is structurally WORST are counted at the worst end
+    of that metric's winsorize bounds (instead of being dropped), so a
+    sector full of money-losers cannot make the target look worse-ranked
+    than it is. The displayed peer_median uses real peer values only.
+    """
+    peers = [s for s in snaps if s != sym]
+    target = build_all_metrics(snaps[sym], closes, sym)
+    peer_metrics = {p: build_all_metrics(snaps[p], closes, p) for p in peers}
+    pillar_scores, pillars_out = {}, {}
+    for pillar, metrics in target.items():
+        pcts, detail = {}, {}
+        for mname, mval in metrics.items():
+            bounds = CONFIG["winsorize"].get(mname)
+            real_vals, ranked_vals = [], []
+            for p in peers:
+                pv = peer_metrics[p][pillar].get(mname)
+                if isinstance(pv, str) and pv == WORST:
+                    if bounds:
+                        ranked_vals.append(
+                            bounds[1] if mname in LOWER_IS_BETTER
+                            else bounds[0])
+                    continue
+                pv = winsorize(pv, bounds)
+                if isinstance(pv, (int, float)):
+                    real_vals.append(pv)
+                    ranked_vals.append(pv)
+            v = winsorize(mval, bounds)
+            pcts[mname] = percentile_rank(v, ranked_vals,
+                                          mname in LOWER_IS_BETTER)
+            structural = isinstance(mval, str) and mval == WORST
+            detail[mname] = {
+                "value": None if structural else mval,
+                "structural_worst": structural,
+                "pct": pcts[mname],
+                "peer_median": _median(real_vals),
+            }
+        weights = CONFIG["metric_weights"].get(pillar)
+        score, used = score_pillar(pcts, weights)
+        pillar_scores[pillar] = score
+        pillars_out[pillar] = {
+            "grade": grade(score),
+            "percentile": score,
+            "evidence": evidence_str(detail),
+            "metrics": detail,
+            "used_metrics": used,
+        }
+    comp, na = composite_score(pillar_scores, CONFIG["pillar_weights"])
+    verdict, notes = decide_verdict(comp, pillar_scores)
+    return {"pillars": pillars_out, "pillar_scores": pillar_scores,
+            "composite": comp, "verdict": verdict, "notes": notes,
+            "na_pillars": na}
+
+
+def run(sym, refresh=False):
+    """Full pipeline for one ticker. Raises ValueError if unscoreable."""
+    sym = sym.upper()
+    snap = fetch_snapshot(sym, refresh)
+    info = snap["info"]
+    if info.get("quoteType") != "EQUITY":
+        raise ValueError(f"not an equity (quoteType="
+                         f"{info.get('quoteType')!r}) - cannot score")
+    if not info.get("industryKey"):
+        raise ValueError("no industry classification - cannot build peer set")
+    peers = resolve_peers(sym, info, refresh)
+    snaps = {sym: snap}
+    for p in peers:
+        try:
+            snaps[p] = fetch_snapshot(p, refresh)
+        except Exception:
+            pass
+    closes = fetch_prices(list(snaps), refresh)
+    result = score_ticker(sym, snaps, closes)
+    flags = list(result.pop("notes"))
+    flags += universe_flags(info)
+    peer_count = len(snaps) - 1
+    if peer_count < CONFIG["peers"]["min"]:
+        flags.append(f"LOW CONFIDENCE: only {peer_count} peers after "
+                     "filtering")
+    if (info.get("industryKey") or "").startswith("reit"):
+        flags.append("REIT: P/FFO unavailable in data source; valuation "
+                     "uses standard metrics only")
+    if result["na_pillars"]:
+        flags.append("Pillars N/A (insufficient data): "
+                     + ", ".join(result["na_pillars"]))
+    result.update({
+        "ticker": sym,
+        "name": info.get("longName") or info.get("shortName") or sym,
+        "date": _today(),
+        "industry": info.get("industryKey"),
+        "sector": info.get("sectorKey"),
+        "peers": sorted(p for p in snaps if p != sym),
+        "peer_count": peer_count,
+        "flags": flags,
+    })
+    return result

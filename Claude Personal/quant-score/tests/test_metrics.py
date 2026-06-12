@@ -163,3 +163,55 @@ def test_revisions_metrics_missing_data():
     m2 = qs.revisions_metrics({"0y": {}}, {"0y": {}})
     assert m2["delta_fy0"] is None
     assert m2["breadth"] is None
+
+
+def test_universe_flags():
+    flags = qs.universe_flags({"marketCap": 300e6, "currentPrice": 5.0})
+    assert len(flags) == 2
+    assert qs.universe_flags({"marketCap": 2e9, "currentPrice": 50.0}) == []
+
+
+def test_evidence_str_ratio_vs_median():
+    detail = {"trailing_pe": {"value": 25.0, "structural_worst": False,
+                              "pct": 80.0, "peer_median": 32.0}}
+    s = qs.evidence_str(detail)
+    assert "P/E 25.0 vs median 32.0" in s
+    assert "-22%" in s          # (25-32)/32 = -21.9%
+
+
+def test_evidence_str_percent_metric():
+    detail = {"rev_growth": {"value": 0.30, "structural_worst": False,
+                             "pct": 90.0, "peer_median": 0.10}}
+    s = qs.evidence_str(detail)
+    assert "Rev growth 30.0% vs median 10.0%" in s
+
+
+def test_evidence_str_structural_worst():
+    detail = {"trailing_pe": {"value": None, "structural_worst": True,
+                              "pct": 0.0, "peer_median": 30.0}}
+    assert "negative (worst)" in qs.evidence_str(detail)
+
+
+def test_evidence_str_empty():
+    assert qs.evidence_str({}) == "insufficient data"
+
+
+def test_score_ticker_counts_worst_peers_at_bound():
+    # Target P/E 30 vs one healthy peer (P/E 20) and one structurally-bad
+    # peer (negative earnings -> WORST). The bad peer must count at the
+    # worst end of the winsorize bounds (P/E hi bound 150), not vanish:
+    # target then ranks middle of [20, 150], not worst of [20].
+    def snap(info):
+        return {"info": info, "rev_series": None,
+                "eps_trend": None, "eps_revisions": None}
+    base = {"sectorKey": "technology", "trailingEps": 1.0, "marketCap": 1e9}
+    snaps = {
+        "TGT": snap(dict(base, trailingPE=30.0)),
+        "GOOD": snap(dict(base, trailingPE=20.0)),
+        "BAD": snap({"sectorKey": "technology", "trailingEps": -1.0,
+                     "marketCap": 1e9}),
+    }
+    r = qs.score_ticker("TGT", snaps, None)
+    pe = r["pillars"]["value"]["metrics"]["trailing_pe"]
+    assert pe["pct"] == 50.0           # middle of [20, 30, 150]
+    assert pe["peer_median"] == 20.0   # evidence median: real values only
