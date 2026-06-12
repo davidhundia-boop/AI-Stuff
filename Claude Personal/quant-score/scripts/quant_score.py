@@ -224,3 +224,113 @@ def decide_verdict(composite, pillar_scores):
         notes.append("Value circuit breaker: valuation D+ or worse "
                      "caps verdict at Hold")
     return base, notes
+
+# ---------------------------------------------------------- metric extraction
+
+def _num(x):
+    """Return x as float if it's a usable number, else None.
+    Rejects bool explicitly (bool is an int subclass in Python)."""
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, (int, float)) and not math.isnan(x):
+        return float(x)
+    return None
+
+
+def _pos(x):
+    n = _num(x)
+    return n is not None and n > 0
+
+
+def _median(vals):
+    vals = sorted(v for v in vals
+                  if isinstance(v, (int, float)) and not math.isnan(v))
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+
+def value_metrics(info):
+    """Valuation ratios. Structurally-missing (negative earnings/EBITDA/
+    book) -> WORST sentinel; genuine coverage gaps -> None (dropped)."""
+    eps_ttm = info.get("trailingEps")
+    fcf, mcap = _num(info.get("freeCashflow")), _num(info.get("marketCap"))
+    peg = _num(info.get("trailingPegRatio")) or _num(info.get("pegRatio"))
+    ebitda = info.get("ebitda")
+    m = {
+        "trailing_pe": _num(info.get("trailingPE"))
+                       or (None if _pos(eps_ttm) else WORST),
+        "forward_pe": _num(info.get("forwardPE"))
+                      or (None if _pos(info.get("forwardEps")) else WORST),
+        "peg": peg or (None if _pos(eps_ttm) else WORST),
+        "ps": _num(info.get("priceToSalesTrailing12Months")),
+        "pb": _num(info.get("priceToBook")),
+        "ev_ebitda": _num(info.get("enterpriseToEbitda"))
+                     or (None if (ebitda is None or _pos(ebitda)) else WORST),
+        "fcf_yield": (fcf / mcap) if (fcf is not None and mcap) else None,
+    }
+    # Any negative lower-is-better ratio means a negative denominator
+    # (earnings/book/EBITDA): structurally bad, not "cheap".
+    for k in list(m):
+        if k in LOWER_IS_BETTER and isinstance(m[k], float) and m[k] <= 0:
+            m[k] = WORST
+    return m
+
+
+def growth_metrics(info, rev_series=None):
+    """rev_series: annual Total Revenue, oldest -> latest (up to 4 values)."""
+    m = {
+        "rev_growth": _num(info.get("revenueGrowth")),
+        "eps_growth": _num(info.get("earningsGrowth")),
+        "fwd_eps_growth": estimate_delta(_num(info.get("forwardEps")),
+                                         _num(info.get("trailingEps"))),
+        "rev_cagr_3y": None,
+    }
+    if (rev_series and len(rev_series) >= 3
+            and _pos(rev_series[0]) and _pos(rev_series[-1])):
+        years = len(rev_series) - 1
+        m["rev_cagr_3y"] = (rev_series[-1] / rev_series[0]) ** (1 / years) - 1
+    return m
+
+
+def profitability_metrics(info):
+    fcf, rev = _num(info.get("freeCashflow")), _num(info.get("totalRevenue"))
+    return {
+        "gross_margin": _num(info.get("grossMargins")),
+        "op_margin": _num(info.get("operatingMargins")),
+        "net_margin": _num(info.get("profitMargins")),
+        "roe": _num(info.get("returnOnEquity")),
+        "roa": _num(info.get("returnOnAssets")),
+        "fcf_margin": (fcf / rev) if (fcf is not None and rev) else None,
+    }
+
+
+def momentum_metrics(closes, sym):
+    """Implemented in full in Task 6; see there. Returns all-None until then."""
+    return {**{k: None for k in CONFIG["momentum_windows"]},
+            "dist_52wk_high": None}
+
+
+def revisions_metrics(eps_trend, eps_revisions):
+    """Implemented in full in Task 6; see there."""
+    return {"delta_fy0": None, "delta_fy1": None, "breadth": None}
+
+
+def build_all_metrics(snap, closes, sym):
+    """All five pillars' raw metrics for one ticker, sector mask applied."""
+    info = snap["info"]
+    pillars = {
+        "value": value_metrics(info),
+        "growth": growth_metrics(info, snap.get("rev_series")),
+        "profitability": profitability_metrics(info),
+        "momentum": momentum_metrics(closes, sym),
+        "revisions": revisions_metrics(snap.get("eps_trend"),
+                                       snap.get("eps_revisions")),
+    }
+    mask = SECTOR_MASKS.get(info.get("sectorKey"), set())
+    for pm in pillars.values():
+        for k in list(pm):
+            if k in mask:
+                del pm[k]
+    return pillars

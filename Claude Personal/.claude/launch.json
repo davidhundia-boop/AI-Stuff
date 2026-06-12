@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "rentbuy",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8753", "--directory", "D:/AI Stuff/Rent vs Buy"],
+      "port": 8753
+    },
+    {
+      "name": "nwt-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "D:/AI Stuff/Claude Personal/net-worth-tracker", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "mockup",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8770", "--directory", "D:/AI Stuff/Claude Personal/net-worth-tracker/docs/mockups"],
+      "port": 8770
+    }
+  ]
+}
