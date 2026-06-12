@@ -112,10 +112,13 @@ config constants at the top of the script (default: equal within pillar, 20% per
 
 ### Grades, Composite, Verdict
 
-- Pillar percentile → letter: 90+ → A/A+ · 80–90 → A−/B+ · 65–80 → B/B− ·
-  45–65 → C range · 25–45 → D range · < 25 → F.
-- Composite = weighted average of pillar percentiles, mapped linearly to a 1.0–5.0 score.
-- Verdict: **Strong Buy ≥ 4.0** *and* no pillar below C− · Buy 3.5–4.0 · Hold 2.5–3.5 ·
+- Pillar percentile → letter (explicit bands):
+  A+ ≥ 97 · A 93–97 · A− 90–93 · B+ 85–90 · B 75–85 · B− 65–75 ·
+  C+ 58–65 · C 51–58 · C− 45–51 · D+ 38–45 · D 32–38 · D− 25–32 · F < 25.
+- Composite = weighted average of pillar percentiles, mapped linearly to a 1.0–5.0 score
+  (`1 + 4 × pct/100`).
+- Verdict: **Strong Buy ≥ 4.0** *and* no pillar below C− (composite ≥ 4.0 with any
+  pillar below C− demotes to Buy) · Buy 3.5–4.0 · Hold 2.5–3.5 ·
   Sell 1.5–2.5 · Strong Sell < 1.5.
   (Original 4.5 threshold was shown to be near-unattainable: it requires ~87.5th
   percentile average across five pillars while Value and Growth anti-correlate. 4.0 ≈
@@ -175,8 +178,9 @@ Sanity basket (~10 tickers), all four checks must pass before the skill is consi
    feel rare (real system: ~8% of universe).
 4. **Determinism:** same-day re-run → byte-identical scores (snapshot cache).
 
-Calibration loop: tune pillar weights / verdict thresholds (config constants) until the
-basket passes; document final values in `references/methodology.md`.
+Calibration loop: tune pillar weights, verdict thresholds, and winsorization bounds
+(all config constants) until the basket passes; document final values in
+`references/methodology.md`.
 
 ## Known Limitations (Documented, Accepted)
 
