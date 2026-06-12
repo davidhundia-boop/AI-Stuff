@@ -59,7 +59,7 @@ CONFIG = {
     "strong_buy_pillar_floor": 45.0,   # all pillars >= C- for Strong Buy
     "value_circuit_breaker": 45.0,     # Value pctl < 45 (D+ or worse) caps at Hold
     "universe": {"min_cap": 500e6, "min_price": 10.0},
-    "peers": {"min": 8, "widen_below": 10, "max": 50, "cache_days": 7},
+    "peers": {"min": 8, "widen_below": 8, "max": 50, "cache_days": 7},
     "momentum_windows": {"ret_3m": 63, "ret_6m": 126,
                          "ret_9m": 189, "ret_12m": 252},
     "winsorize": {
