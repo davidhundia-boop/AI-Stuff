@@ -102,3 +102,44 @@ METRIC_LABELS = {
     "delta_fy0": "FY0 est chg 90d", "delta_fy1": "FY1 est chg 90d",
     "breadth": "Revision breadth",
 }
+
+# ---------------------------------------------------------------- scoring core
+
+def winsorize(value, bounds):
+    """Clamp a raw metric value into [lo, hi]; pass through None/no-bounds."""
+    if value is None or bounds is None or not isinstance(value, (int, float)):
+        return value
+    lo, hi = bounds
+    return max(lo, min(hi, value))
+
+
+def percentile_rank(value, peer_values, lower_is_better=False):
+    """Goodness percentile (0=worst, 100=best) of value within the peer pool.
+
+    value=WORST -> 0.0 (structurally bad). value=None/NaN -> None (no data).
+    Needs at least 2 valid peer values, else None.
+    Ties get midrank so identical values share a percentile.
+    """
+    pool = [v for v in peer_values
+            if isinstance(v, (int, float)) and not math.isnan(v)]
+    if isinstance(value, str) and value == WORST:
+        return 0.0 if len(pool) >= 2 else None
+    if not isinstance(value, (int, float)) or math.isnan(value):
+        return None
+    if len(pool) < 2:
+        return None
+    pool = pool + [value]
+    below = sum(1 for v in pool if v < value)
+    ties = sum(1 for v in pool if v == value) - 1  # exclude self
+    rank = (below + 0.5 * ties) / (len(pool) - 1)  # 0..1
+    return 100.0 * (1 - rank) if lower_is_better else 100.0 * rank
+
+
+def grade(pct):
+    """Map a 0-100 percentile to a letter grade per CONFIG bands."""
+    if pct is None:
+        return "N/A"
+    for floor, letter in CONFIG["grade_bands"]:
+        if pct >= floor:
+            return letter
+    return "F"
