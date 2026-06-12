@@ -143,3 +143,16 @@ def grade(pct):
         if pct >= floor:
             return letter
     return "F"
+
+
+def estimate_delta(current, ago):
+    """Sign-aware relative change between two estimates, clamped to [-2, 2].
+
+    Uses abs(ago) as denominator so a zero-crossing (profit -> loss
+    forecast) keeps the correct sign instead of flipping it.
+    """
+    for v in (current, ago):
+        if not isinstance(v, (int, float)) or math.isnan(v):
+            return None
+    denom = max(abs(ago), 0.01)
+    return max(-2.0, min(2.0, (current - ago) / denom))

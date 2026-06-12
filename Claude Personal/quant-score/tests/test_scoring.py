@@ -62,3 +62,27 @@ def test_grade_bands():
     assert qs.grade(24.9) == "F"
     assert qs.grade(0) == "F"
     assert qs.grade(None) == "N/A"
+
+
+def test_estimate_delta_normal():
+    assert abs(qs.estimate_delta(1.2, 1.0) - 0.2) < 1e-9
+
+
+def test_estimate_delta_zero_crossing_is_sign_aware():
+    # Forecast flipped from profit to loss: must be NEGATIVE.
+    d = qs.estimate_delta(-0.0156, 0.0036)
+    assert d is not None and d < 0
+    # Recovery from loss to profit must be POSITIVE.
+    d2 = qs.estimate_delta(0.50, -0.25)
+    assert d2 is not None and d2 > 0
+
+
+def test_estimate_delta_clamped():
+    assert qs.estimate_delta(100.0, 0.5) == 2.0
+    assert qs.estimate_delta(-100.0, 0.5) == -2.0
+
+
+def test_estimate_delta_missing():
+    assert qs.estimate_delta(None, 1.0) is None
+    assert qs.estimate_delta(1.0, None) is None
+    assert qs.estimate_delta(float("nan"), 1.0) is None
