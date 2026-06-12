@@ -542,7 +542,13 @@ def _filter_universe(symbols, target_sym, seen_names, taken, refresh=False):
 
 def resolve_peers(sym, info, refresh=False):
     """Peer symbols for sym: industry top_companies, widened to sibling
-    industries then sector if thin. Cached 7 days per industry."""
+    industries then sector if thin. Cached 7 days per industry.
+
+    The cache stores the FULL industry roster including sym itself so that
+    different tickers in the same industry all see a consistent peer set;
+    sym is filtered out only on read/return.  Empty pools are never persisted
+    so transient network failures self-heal on the next run.
+    """
     ik, sk = info.get("industryKey"), info.get("sectorKey")
     if not ik:
         return []
@@ -561,21 +567,25 @@ def resolve_peers(sym, info, refresh=False):
             return []
 
     seen_names, taken = set(), set()
-    pool = _filter_universe(candidates(yf.Industry(ik)), sym,
+    # Pass "" as target_sym so the cached roster includes the current ticker;
+    # the target is filtered out on read/return above and at the final return.
+    pool = _filter_universe(candidates(yf.Industry(ik)), "",
                             seen_names, taken, refresh)
     if len(pool) < CONFIG["peers"]["widen_below"] and sk:
         sec = yf.Sector(sk)
         try:  # sibling industries first (closer comps than whole sector)
             for sib in [str(i) for i in sec.industries.index if str(i) != ik]:
-                pool += _filter_universe(candidates(yf.Industry(sib)), sym,
+                pool += _filter_universe(candidates(yf.Industry(sib)), "",
                                          seen_names, taken, refresh)
                 if len(pool) >= CONFIG["peers"]["widen_below"]:
                     break
         except Exception:
             pass
         if len(pool) < CONFIG["peers"]["min"]:
-            pool += _filter_universe(candidates(sec), sym,
+            pool += _filter_universe(candidates(sec), "",
                                      seen_names, taken, refresh)
     pool = pool[:CONFIG["peers"]["max"]]
-    save_cache(cache_name, pool)
+    # Never persist an empty pool; transient failures should self-heal next run.
+    if pool:
+        save_cache(cache_name, pool)
     return [p for p in pool if p != sym.upper()]
