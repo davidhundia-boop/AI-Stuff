@@ -373,3 +373,209 @@ def build_all_metrics(snap, closes, sym):
             if k in mask:
                 del pm[k]
     return pillars
+
+
+# -------------------------------------------------------------------- data IO
+
+def _today():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def with_retry(fn, attempts=3):
+    """Run fn() with exponential backoff (1s, 2s) on any exception."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception:
+            if i == attempts - 1:
+                raise
+            time.sleep(2 ** i)
+
+
+def load_cache(name, max_age_days):
+    f = CACHE_DIR / name
+    if not f.exists():
+        return None
+    age_days = (time.time() - f.stat().st_mtime) / 86400
+    if age_days > max_age_days:
+        return None
+    try:
+        return json.loads(f.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def save_cache(name, obj):
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    (CACHE_DIR / name).write_text(
+        json.dumps(obj, default=str), encoding="utf-8")
+
+
+def purge_cache(max_age_days=7):
+    """Delete cache files older than max_age_days (keeps the dir bounded)."""
+    if not CACHE_DIR.exists():
+        return
+    cutoff = time.time() - max_age_days * 86400
+    for f in CACHE_DIR.iterdir():
+        try:
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
+def fetch_info(sym, refresh=False):
+    """One ticker's .info dict, cached for the day (cheap universe checks)."""
+    name = f"info_{sym}_{_today()}.json"
+    if not refresh:
+        c = load_cache(name, 1)
+        if c is not None:
+            return c
+    import yfinance as yf
+    info = with_retry(lambda: yf.Ticker(sym).info) or {}
+    save_cache(name, info)
+    return info
+
+
+def fetch_snapshot(sym, refresh=False):
+    """Full per-ticker snapshot: info + revenue series + EPS frames.
+    Cached for the day -> same-day re-runs are deterministic."""
+    name = f"snap_{sym}_{_today()}.json"
+    if not refresh:
+        c = load_cache(name, 1)
+        if c is not None:
+            return c
+    import yfinance as yf
+    snap = {"info": fetch_info(sym, refresh), "rev_series": None,
+            "eps_trend": None, "eps_revisions": None}
+    t = yf.Ticker(sym)
+    try:
+        fin = with_retry(lambda: t.financials)
+        if fin is not None and "Total Revenue" in fin.index:
+            vals = [_num(v) for v in fin.loc["Total Revenue"].values[:4]]
+            vals = [v for v in vals if v is not None]
+            snap["rev_series"] = list(reversed(vals))  # oldest -> latest
+    except Exception:
+        pass
+    try:
+        et = with_retry(lambda: t.eps_trend)
+        if et is not None and not et.empty:
+            snap["eps_trend"] = {
+                str(idx): {c: _num(v) for c, v in row.items()
+                           if c != "currency"}
+                for idx, row in et.iterrows()}
+    except Exception:
+        pass
+    try:
+        er = with_retry(lambda: t.eps_revisions)
+        if er is not None and not er.empty:
+            snap["eps_revisions"] = {
+                str(idx): {c: _num(v) for c, v in row.items()}
+                for idx, row in er.iterrows()}
+    except Exception:
+        pass
+    save_cache(name, snap)
+    return snap
+
+
+def fetch_prices(symbols, refresh=False):
+    """Batched 2y daily closes for all symbols in ONE request (atomic
+    same-bar snapshot -> deterministic momentum). Cached per day."""
+    key = hashlib.md5(",".join(sorted(symbols)).encode()).hexdigest()[:10]
+    f = CACHE_DIR / f"prices_{key}_{_today()}.csv"
+    if f.exists() and not refresh:
+        return pd.read_csv(f, index_col=0, parse_dates=True)
+    import yfinance as yf
+    df = with_retry(lambda: yf.download(
+        list(symbols), period="2y", auto_adjust=True, progress=False))
+    closes = df["Close"]
+    if isinstance(closes, pd.Series):
+        closes = closes.to_frame(list(symbols)[0])
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    closes.to_csv(f)
+    return closes
+
+
+# ------------------------------------------------------------ peer resolution
+
+def _norm_name(name):
+    """Normalize a company name for duplicate-entity detection
+    (BK and BNY both resolve to 'bank of new york mellon')."""
+    n = re.sub(r"[^a-z0-9 ]", "", (name or "").lower()).strip()
+    if n.startswith("the "):
+        n = n[4:]
+    for suf in (" incorporated", " corporation", " holdings", " companies",
+                " company", " inc", " corp", " plc", " ltd", " co"):
+        while n.endswith(suf):
+            n = n[: -len(suf)].strip()
+    return n
+
+
+def _filter_universe(symbols, target_sym, seen_names, taken, refresh=False):
+    """Apply universe criteria + EQUITY gate + name dedupe to candidate
+    symbols (in given order). Mutates seen_names/taken; returns new picks."""
+    out = []
+    for s in symbols:
+        s = str(s).upper()
+        if s == target_sym.upper() or s in taken:
+            continue
+        try:
+            info = fetch_info(s, refresh)
+        except Exception:
+            continue
+        if info.get("quoteType") != "EQUITY":
+            continue
+        if (_num(info.get("marketCap")) or 0) < CONFIG["universe"]["min_cap"]:
+            continue
+        price = (_num(info.get("currentPrice"))
+                 or _num(info.get("regularMarketPrice")) or 0)
+        if price < CONFIG["universe"]["min_price"]:
+            continue
+        nm = _norm_name(info.get("longName") or info.get("shortName"))
+        if nm and nm in seen_names:
+            continue
+        seen_names.add(nm)
+        taken.add(s)
+        out.append(s)
+    return out
+
+
+def resolve_peers(sym, info, refresh=False):
+    """Peer symbols for sym: industry top_companies, widened to sibling
+    industries then sector if thin. Cached 7 days per industry."""
+    ik, sk = info.get("industryKey"), info.get("sectorKey")
+    if not ik:
+        return []
+    cache_name = f"peers_{ik}.json"
+    if not refresh:
+        c = load_cache(cache_name, CONFIG["peers"]["cache_days"])
+        if c is not None:
+            return [p for p in c if p != sym.upper()]
+    import yfinance as yf
+
+    def candidates(container):
+        try:
+            tc = with_retry(lambda: container.top_companies)
+            return [] if tc is None else [str(i) for i in tc.index]
+        except Exception:
+            return []
+
+    seen_names, taken = set(), set()
+    pool = _filter_universe(candidates(yf.Industry(ik)), sym,
+                            seen_names, taken, refresh)
+    if len(pool) < CONFIG["peers"]["widen_below"] and sk:
+        sec = yf.Sector(sk)
+        try:  # sibling industries first (closer comps than whole sector)
+            for sib in [str(i) for i in sec.industries.index if str(i) != ik]:
+                pool += _filter_universe(candidates(yf.Industry(sib)), sym,
+                                         seen_names, taken, refresh)
+                if len(pool) >= CONFIG["peers"]["widen_below"]:
+                    break
+        except Exception:
+            pass
+        if len(pool) < CONFIG["peers"]["min"]:
+            pool += _filter_universe(candidates(sec), sym,
+                                     seen_names, taken, refresh)
+    pool = pool[:CONFIG["peers"]["max"]]
+    save_cache(cache_name, pool)
+    return [p for p in pool if p != sym.upper()]
